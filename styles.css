@@ -498,7 +498,7 @@ textarea { resize: vertical; min-height: 72px; }
   font-family: "Geist Mono", ui-monospace, monospace;
 }
 
-/* WhatsApp reminder button */
+/* Reminder buttons */
 .btn-sm.wa {
   background: #fff;
   color: #075e54;
@@ -508,6 +508,13 @@ textarea { resize: vertical; min-height: 72px; }
   box-shadow: var(--shadow-light);
 }
 .btn-sm.wa:hover { background: #e7f7ef; color: #075e54; }
+
+.btn-sm.email {
+  background: #fff;
+  color: var(--badge-text);
+  box-shadow: var(--shadow-light);
+}
+.btn-sm.email:hover { background: var(--badge-bg); color: var(--badge-text); }
 
 /* Fade in */
 @media (prefers-reduced-motion: no-preference) {

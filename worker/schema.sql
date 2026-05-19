@@ -9,10 +9,12 @@ CREATE TABLE IF NOT EXISTS clients (
   amount INTEGER NOT NULL DEFAULT 0,
   method TEXT,
   phone TEXT,
+  email TEXT,
   notes TEXT,
   start_date TEXT NOT NULL,
   next_due TEXT,
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','paused','churned','completed')),
+  reminder_method TEXT NOT NULL DEFAULT 'whatsapp' CHECK (reminder_method IN ('whatsapp','email','kra_invoice','none')),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 

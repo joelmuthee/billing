@@ -221,27 +221,77 @@ function renderBanner() {
   el.classList.toggle('danger', overdue.length > 0);
 }
 
-// WhatsApp click-to-send reminder (no auto messaging — opens WA with text prefilled)
+// ────────── Reminder helpers ──────────
+
+function firstName(c) {
+  return (c.name || '').split(/\s+/)[0] || c.name || '';
+}
+
 function waReminderUrl(c, kind) {
   if (!c.phone) return null;
   const digits = c.phone.replace(/\D/g, '');
   if (!digits) return null;
-  const firstName = c.name.split(/\s+/)[0] || c.name;
   const amount = fmtKES(c.amount);
   const dateStr = fmtDate(c.next_due);
   let msg;
   if (kind === 'overdue') {
-    msg = `Hi ${firstName}, just a quick reminder that the ${amount} payment was due on ${dateStr} and is still pending. Could you settle it when you get a chance? Thanks.`;
+    msg = `Hi ${firstName(c)}, just a quick reminder that the ${amount} payment was due on ${dateStr} and is still pending. Could you settle it when you get a chance? Thanks.`;
   } else {
-    msg = `Hi ${firstName}, friendly reminder that your ${amount} payment is due on ${dateStr}. Thanks.`;
+    msg = `Hi ${firstName(c)}, friendly reminder that your ${amount} payment is due on ${dateStr}. Thanks.`;
   }
   return `https://wa.me/${digits}?text=${encodeURIComponent(msg)}`;
 }
 
-function waButton(c, kind) {
-  const url = waReminderUrl(c, kind);
-  if (!url) return '';
-  return `<a class="btn-sm wa" href="${url}" target="_blank" rel="noopener">Remind</a>`;
+function emailDraft(c, kind) {
+  const amount = fmtKES(c.amount);
+  const dateStr = fmtDate(c.next_due);
+  const subject = kind === 'overdue'
+    ? `Payment reminder, ${amount}`
+    : `Payment due ${dateStr}`;
+  const body = kind === 'overdue'
+    ? `Hi ${firstName(c)},\n\nJust a quick reminder that the ${amount} payment was due on ${dateStr} and is still pending. Could you settle it when you get a chance?\n\nThanks,\nJoel\nEssence Automations`
+    : `Hi ${firstName(c)},\n\nFriendly reminder that your ${amount} payment is due on ${dateStr}.\n\nThanks,\nJoel\nEssence Automations`;
+  return { subject, body };
+}
+
+async function copyEmailDraft(clientId, kind) {
+  const c = state.clients.find((x) => x.id === clientId);
+  if (!c) return;
+  const { subject, body } = emailDraft(c, kind);
+  const text = `Subject: ${subject}\n\n${body}`;
+  try {
+    await navigator.clipboard.writeText(text);
+    toast('Email draft copied. Paste into Gmail or your mail app.');
+  } catch {
+    // Fallback: show in a modal so the user can copy manually
+    openModal(`
+      <h2>Email draft</h2>
+      <p class="muted" style="margin-bottom:14px;">Copy this into your email client.</p>
+      <textarea readonly style="height: 220px; font-family: 'Geist Mono', monospace; font-size: 13px;">${escapeHtml(text)}</textarea>
+      <div class="modal-actions">
+        <button type="button" class="btn-primary" onclick="closeModal()">Done</button>
+      </div>
+    `);
+  }
+}
+window.copyEmailDraft = copyEmailDraft;
+
+// Returns the right reminder element for a row based on the client's preferred method
+function reminderAction(c, kind) {
+  const m = c.reminder_method || 'whatsapp';
+  if (m === 'whatsapp') {
+    const url = waReminderUrl(c, kind);
+    if (!url) return '<span class="badge muted" title="No phone saved">no phone</span>';
+    return `<a class="btn-sm wa" href="${url}" target="_blank" rel="noopener">Remind</a>`;
+  }
+  if (m === 'email') {
+    if (!c.email) return '<span class="badge muted" title="No email saved">no email</span>';
+    return `<button class="btn-sm email" onclick="copyEmailDraft(${c.id}, '${kind}')">Copy email</button>`;
+  }
+  if (m === 'kra_invoice') {
+    return '<span class="badge muted">KRA invoice</span>';
+  }
+  return ''; // 'none'
 }
 
 function renderKPIs() {
@@ -325,7 +375,7 @@ function renderUpcoming() {
       </div>
       <div class="actions">
         <div class="amount num">${fmtKES(c.amount)}</div>
-        ${waButton(c, 'upcoming')}
+        ${reminderAction(c, 'upcoming')}
         <button class="btn-sm" onclick="quickPay(${c.id})">Mark paid</button>
       </div>
     </div>
@@ -354,7 +404,7 @@ function renderOverdue() {
       </div>
       <div class="actions">
         <div class="amount num">${fmtKES(c.amount)}</div>
-        ${waButton(c, 'overdue')}
+        ${reminderAction(c, 'overdue')}
         <button class="btn-sm" onclick="quickPay(${c.id})">Mark paid</button>
       </div>
     </div>
@@ -656,8 +706,23 @@ function clientFormHtml(c) {
           </select>
         </label>
         <label>
-          <span>Phone <span class="hint">(optional)</span></span>
-          <input type="tel" name="phone" value="${isEdit && c.phone ? escapeAttr(c.phone) : ''}">
+          <span>Reminder method</span>
+          <select name="reminder_method">
+            <option value="whatsapp" ${!isEdit || c.reminder_method === 'whatsapp' ? 'selected' : ''}>WhatsApp</option>
+            <option value="email" ${isEdit && c.reminder_method === 'email' ? 'selected' : ''}>Email (copy draft)</option>
+            <option value="kra_invoice" ${isEdit && c.reminder_method === 'kra_invoice' ? 'selected' : ''}>KRA invoice (no reminder)</option>
+            <option value="none" ${isEdit && c.reminder_method === 'none' ? 'selected' : ''}>None</option>
+          </select>
+        </label>
+      </div>
+      <div class="form-row">
+        <label>
+          <span>Phone <span class="hint">(needed for WhatsApp reminders)</span></span>
+          <input type="tel" name="phone" placeholder="+254712345678" value="${isEdit && c.phone ? escapeAttr(c.phone) : ''}">
+        </label>
+        <label>
+          <span>Email <span class="hint">(needed for email reminders)</span></span>
+          <input type="email" name="email" value="${isEdit && c.email ? escapeAttr(c.email) : ''}">
         </label>
       </div>
       ${isEdit ? `
@@ -698,9 +763,11 @@ window.editClient = function (id) {
       start_date: fd.get('start_date'),
       next_due: fd.get('next_due') || null,
       method: fd.get('method') || null,
-      phone: fd.get('phone').trim() || null,
-      notes: fd.get('notes').trim() || null,
+      phone: (fd.get('phone') || '').trim() || null,
+      email: (fd.get('email') || '').trim() || null,
+      notes: (fd.get('notes') || '').trim() || null,
       status: fd.get('status') || 'active',
+      reminder_method: fd.get('reminder_method') || 'whatsapp',
     };
     try {
       if (c) await api(`/api/clients/${c.id}`, { method: 'PUT', body: JSON.stringify(body) });
