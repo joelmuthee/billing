@@ -80,13 +80,19 @@ const daysFromToday = (iso) => {
 const fmtDate = (iso) => {
   const d = parseISO(iso);
   if (!d) return '';
-  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  // DD/MM/YYYY
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  return `${dd}/${mm}/${d.getFullYear()}`;
 };
 
 const fmtDateShort = (iso) => {
   const d = parseISO(iso);
   if (!d) return '';
-  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+  // DD/MM
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  return `${dd}/${mm}`;
 };
 
 const fmtRelative = (iso) => {
