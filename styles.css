@@ -134,6 +134,27 @@ textarea { resize: vertical; min-height: 72px; }
 }
 .btn-ghost:hover { background: var(--surface); }
 
+/* Solid red destructive CTA (used in type-to-confirm dialogs) */
+.btn-danger-solid {
+  background: var(--red);
+  color: #fff;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  transition: opacity 0.15s;
+}
+.btn-danger-solid:hover:not(:disabled) { opacity: 0.9; }
+.btn-danger-solid:disabled {
+  background: var(--surface);
+  color: var(--placeholder);
+  box-shadow: var(--shadow-light);
+  cursor: not-allowed;
+}
+
 .btn-sm {
   padding: 5px 10px;
   font-size: 13px;
