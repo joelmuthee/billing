@@ -6,6 +6,36 @@ const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
 
+// Service catalogue, sourced from essenceautomations.com
+const SERVICES_CATEGORIES = [
+  { name: 'Get Found', items: [
+    { value: 'websites', label: 'Ultra-modern Websites' },
+    { value: 'gbp-booster', label: 'GBP Booster' },
+    { value: 'seo-content', label: 'SEO Content Engine' },
+    { value: 'email-prospecting', label: 'Email Prospecting' },
+  ]},
+  { name: 'Convert', items: [
+    { value: 'ai-chat', label: 'AI Chat' },
+    { value: 'google-reviews', label: 'Google Reviews' },
+    { value: 'ai-ads', label: 'AI Ads Manager' },
+    { value: 'email-automation', label: 'Email Automation' },
+  ]},
+  { name: 'Retain', items: [
+    { value: 'crm', label: 'CRM With App' },
+    { value: 'wa-marketing', label: 'WhatsApp Marketing' },
+    { value: 'email-marketing', label: 'Email Marketing' },
+    { value: 'appointment-calendar', label: 'Appointment Calendar' },
+  ]},
+  { name: 'Operate', items: [
+    { value: 'social-media', label: 'Social Media Management' },
+    { value: 'document-management', label: 'Document Management' },
+    { value: 'smart-qr', label: 'Smart QR' },
+  ]},
+];
+const SERVICE_LABEL = Object.fromEntries(
+  SERVICES_CATEGORIES.flatMap((c) => c.items).map((s) => [s.value, s.label])
+);
+
 const state = {
   apiBase: API_BASE,
   token: localStorage.getItem('cd_token') || '',
@@ -455,6 +485,7 @@ function renderClientsList() {
   });
   el.innerHTML = sorted.map((c) => {
     const overdue = c.status === 'active' && c.next_due && c.next_due < todayISO();
+    const chips = servicesChips(c.services);
     return `
       <div class="list-row">
         <div>
@@ -466,6 +497,7 @@ function renderClientsList() {
             ${c.next_due ? `<span>Next due ${fmtDate(c.next_due)}</span>` : `<span>${c.plan === 'one-off' ? 'One off' : 'No due date'}</span>`}
             ${c.phone ? `<span class="mono">${escapeHtml(c.phone)}</span>` : ''}
           </div>
+          ${chips ? `<div class="chips">${chips}</div>` : ''}
         </div>
         <div class="actions">
           <div class="amount num">${fmtKES(c.amount)}</div>
@@ -1179,6 +1211,35 @@ $('#addExpenseBtn').addEventListener('click', () => editExpense(null));
 $('#logExpensePaymentBtn').addEventListener('click', () => logExpensePayment(null));
 $('#quickExpenseBtn').addEventListener('click', () => recordQuickExpense());
 
+function servicesFieldHtml(selected) {
+  const sel = new Set(selected || []);
+  return `
+    <label>
+      <span>Services <span class="hint">(what they pay for, pick any)</span></span>
+      <div class="services-grid">
+        ${SERVICES_CATEGORIES.map((cat) => `
+          <div class="service-group">
+            <div class="service-group-name">${cat.name}</div>
+            ${cat.items.map((s) => `
+              <label class="check">
+                <input type="checkbox" name="services" value="${s.value}" ${sel.has(s.value) ? 'checked' : ''}>
+                <span>${escapeHtml(s.label)}</span>
+              </label>
+            `).join('')}
+          </div>
+        `).join('')}
+      </div>
+    </label>
+  `;
+}
+
+function servicesChips(services) {
+  if (!services || !services.length) return '';
+  return services
+    .map((s) => `<span class="service-chip">${escapeHtml(SERVICE_LABEL[s] || s)}</span>`)
+    .join('');
+}
+
 function clientFormHtml(c) {
   const isEdit = !!c;
   return `
@@ -1258,6 +1319,7 @@ function clientFormHtml(c) {
           </select>
         </label>
       ` : ''}
+      ${servicesFieldHtml(isEdit ? (c.services || []) : [])}
       <label>
         <span>Notes <span class="hint">(optional)</span></span>
         <textarea name="notes">${isEdit && c.notes ? escapeHtml(c.notes) : ''}</textarea>
@@ -1290,6 +1352,7 @@ window.editClient = function (id) {
       notes: (fd.get('notes') || '').trim() || null,
       status: fd.get('status') || 'active',
       reminder_method: fd.get('reminder_method') || 'whatsapp',
+      services: fd.getAll('services'),
     };
     try {
       if (c) await api(`/api/clients/${c.id}`, { method: 'PUT', body: JSON.stringify(body) });

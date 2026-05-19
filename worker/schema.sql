@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS clients (
   next_due TEXT,
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','paused','churned','completed')),
   reminder_method TEXT NOT NULL DEFAULT 'whatsapp' CHECK (reminder_method IN ('whatsapp','email','kra_invoice','none')),
+  services TEXT NOT NULL DEFAULT '[]',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 

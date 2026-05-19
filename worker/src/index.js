@@ -87,6 +87,21 @@ function validateClient(c) {
   return null;
 }
 
+function parseServices(s) {
+  if (!s) return [];
+  try {
+    const arr = JSON.parse(s);
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+}
+
+function serializeServices(arr) {
+  if (!Array.isArray(arr)) return '[]';
+  return JSON.stringify(arr.filter((s) => typeof s === 'string'));
+}
+
 function validatePayment(p) {
   if (!p || typeof p !== "object") return "body must be an object";
   if (!Number.isInteger(p.client_id)) return "client_id is required";
@@ -135,12 +150,16 @@ export default {
     }
 
     if (request.method === "GET" && path === "/api/data") {
-      const clients = await env.DB.prepare("SELECT * FROM clients ORDER BY name COLLATE NOCASE").all();
+      const clientsRs = await env.DB.prepare("SELECT * FROM clients ORDER BY name COLLATE NOCASE").all();
       const payments = await env.DB.prepare("SELECT * FROM payments ORDER BY paid_on DESC, id DESC").all();
       const expenses = await env.DB.prepare("SELECT * FROM expenses ORDER BY name COLLATE NOCASE").all();
       const expensePayments = await env.DB.prepare("SELECT * FROM expense_payments ORDER BY paid_on DESC, id DESC").all();
+      const clients = (clientsRs.results || []).map((c) => ({
+        ...c,
+        services: parseServices(c.services),
+      }));
       return json({
-        clients: clients.results || [],
+        clients,
         payments: payments.results || [],
         expenses: expenses.results || [],
         expense_payments: expensePayments.results || [],
@@ -154,8 +173,8 @@ export default {
       const next_due = body.next_due || (body.plan === "one-off" ? null : body.start_date);
       const status = body.status || (body.plan === "one-off" ? "active" : "active");
       const result = await env.DB.prepare(
-        `INSERT INTO clients (name, business, plan, amount, method, phone, email, notes, start_date, next_due, status, reminder_method)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO clients (name, business, plan, amount, method, phone, email, notes, start_date, next_due, status, reminder_method, services)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
         .bind(
           body.name.trim(),
@@ -169,12 +188,13 @@ export default {
           body.start_date,
           next_due,
           status,
-          body.reminder_method || "whatsapp"
+          body.reminder_method || "whatsapp",
+          serializeServices(body.services)
         )
         .run();
       const id = result.meta.last_row_id;
       const created = await env.DB.prepare("SELECT * FROM clients WHERE id = ?").bind(id).first();
-      return json({ client: created }, 201);
+      return json({ client: { ...created, services: parseServices(created.services) } }, 201);
     }
 
     const clientMatch = path.match(/^\/api\/clients\/(\d+)$/);
@@ -187,7 +207,7 @@ export default {
         await env.DB.prepare(
           `UPDATE clients
            SET name = ?, business = ?, plan = ?, amount = ?, method = ?, phone = ?, email = ?, notes = ?,
-               start_date = ?, next_due = ?, status = ?, reminder_method = ?
+               start_date = ?, next_due = ?, status = ?, reminder_method = ?, services = ?
            WHERE id = ?`
         )
           .bind(
@@ -203,12 +223,13 @@ export default {
             body.next_due || null,
             body.status || "active",
             body.reminder_method || "whatsapp",
+            serializeServices(body.services),
             id
           )
           .run();
         const updated = await env.DB.prepare("SELECT * FROM clients WHERE id = ?").bind(id).first();
         if (!updated) return json({ error: "not found" }, 404);
-        return json({ client: updated });
+        return json({ client: { ...updated, services: parseServices(updated.services) } });
       }
       if (request.method === "DELETE") {
         await env.DB.prepare("DELETE FROM clients WHERE id = ?").bind(id).run();
