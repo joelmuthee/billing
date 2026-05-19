@@ -4,8 +4,10 @@
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
+const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
+
 const state = {
-  apiBase: localStorage.getItem('cd_api') || '',
+  apiBase: API_BASE,
   token: localStorage.getItem('cd_token') || '',
   clients: [],
   payments: [],
@@ -126,16 +128,13 @@ function logout() {
 
 $('#loginForm').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const apiBase = $('#apiBase').value.trim().replace(/\/$/, '');
   const password = $('#password').value;
   const errEl = $('#loginError');
   errEl.classList.add('hidden');
-  if (!apiBase || !password) return;
-  state.apiBase = apiBase;
+  if (!password) return;
   state.token = password;
   try {
     await api('/api/auth', { method: 'POST' });
-    localStorage.setItem('cd_api', apiBase);
     localStorage.setItem('cd_token', password);
     showApp();
     await loadData();
@@ -804,8 +803,7 @@ function escapeAttr(s) { return escapeHtml(s); }
 // ────────── Boot ──────────
 
 (async function boot() {
-  if (state.apiBase) $('#apiBase').value = state.apiBase;
-  if (state.token && state.apiBase) {
+  if (state.token) {
     try {
       await api('/api/auth', { method: 'POST' });
       showApp();
