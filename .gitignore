@@ -11,3 +11,7 @@ node_modules/
 .tmp/
 *.log
 *.bak
+
+# Playwright debug output
+.playwright-mcp/
+mobile-login.png

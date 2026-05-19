@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clients Dashboard</title>
+  <title>Billing</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
@@ -14,7 +14,7 @@
   <!-- Login -->
   <div id="login" class="login-wrap">
     <div class="login-card">
-      <h1>Clients Dashboard</h1>
+      <h1>Billing</h1>
       <p class="muted">Sign in to continue.</p>
       <form id="loginForm">
         <label>
@@ -34,15 +34,13 @@
   <!-- App -->
   <div id="app" class="hidden">
     <header class="header">
-      <div class="header-left">
-        <div class="logo">Clients Dashboard</div>
-        <nav class="tabs">
-          <button class="tab active" data-tab="dashboard">Dashboard</button>
-          <button class="tab" data-tab="clients">Clients</button>
-          <button class="tab" data-tab="payments">Payments</button>
-          <button class="tab" data-tab="revenue">Revenue</button>
-        </nav>
-      </div>
+      <div class="logo">Billing</div>
+      <nav class="tabs">
+        <button class="tab active" data-tab="dashboard">Dashboard</button>
+        <button class="tab" data-tab="clients">Clients</button>
+        <button class="tab" data-tab="payments">Payments</button>
+        <button class="tab" data-tab="revenue">Revenue</button>
+      </nav>
       <button id="logout" class="btn-ghost">Log out</button>
     </header>
 
@@ -74,7 +72,7 @@
       </section>
 
       <!-- Clients -->
-      <section id="tab-clients" class="tab-panel hidden">
+      <section id="tab-clients" class="tab-panel">
         <div class="row-between">
           <h2>All clients</h2>
           <button class="btn-primary" id="addClientBtn">+ Add client</button>
@@ -83,7 +81,7 @@
       </section>
 
       <!-- Payments -->
-      <section id="tab-payments" class="tab-panel hidden">
+      <section id="tab-payments" class="tab-panel">
         <div class="row-between">
           <h2>Payments</h2>
           <button class="btn-primary" id="addPaymentBtn">+ Record payment</button>
@@ -92,7 +90,7 @@
       </section>
 
       <!-- Revenue -->
-      <section id="tab-revenue" class="tab-panel hidden">
+      <section id="tab-revenue" class="tab-panel">
         <div class="row-between">
           <h2>Revenue</h2>
           <div class="seg-control" id="revenuePeriod">

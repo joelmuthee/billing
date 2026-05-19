@@ -281,7 +281,7 @@ function renderUpcoming() {
           <span>Due ${fmtDate(c.next_due)} · ${fmtRelative(c.next_due)}</span>
         </div>
       </div>
-      <div style="display:flex;gap:10px;align-items:center;">
+      <div class="actions">
         <div class="amount num">${fmtKES(c.amount)}</div>
         <button class="btn-sm" onclick="quickPay(${c.id})">Mark paid</button>
       </div>
@@ -309,7 +309,7 @@ function renderOverdue() {
           <span>Was due ${fmtDate(c.next_due)}</span>
         </div>
       </div>
-      <div style="display:flex;gap:10px;align-items:center;">
+      <div class="actions">
         <div class="amount num">${fmtKES(c.amount)}</div>
         <button class="btn-sm" onclick="quickPay(${c.id})">Mark paid</button>
       </div>
@@ -369,7 +369,7 @@ function renderClientsList() {
           </div>
         </div>
         <div class="actions">
-          <div class="amount num" style="margin-right:6px;">${fmtKES(c.amount)}</div>
+          <div class="amount num">${fmtKES(c.amount)}</div>
           <button class="btn-sm" onclick="quickPay(${c.id})">Pay</button>
           <button class="btn-sm" onclick="editClient(${c.id})">Edit</button>
           <button class="btn-sm danger" onclick="deleteClient(${c.id})">Delete</button>
@@ -501,13 +501,18 @@ function renderBarChart() {
 
   $('#revenueChart').innerHTML = `
     <div class="bar-chart">
-      ${months.map((m) => `
-        <div class="bar-col">
-          ${m.total > 0 ? `<div class="bar-value">${shortNum(m.total)}</div>` : ''}
-          <div class="bar" style="height: ${(m.total / max) * 100}%;" title="${m.label}: ${fmtKES(m.total)}"></div>
-          <div class="bar-label">${m.label}</div>
-        </div>
-      `).join('')}
+      ${months.map((m) => {
+        const pct = (m.total / max) * 100;
+        return `
+          <div class="bar-col">
+            <div class="bar-value">${m.total > 0 ? shortNum(m.total) : ''}</div>
+            ${m.total > 0
+              ? `<div class="bar" style="height: ${pct}%; min-height: 4px;" title="${m.label}: ${fmtKES(m.total)}"></div>`
+              : `<div class="bar-spacer"></div>`}
+            <div class="bar-label">${m.label}</div>
+          </div>
+        `;
+      }).join('')}
     </div>
   `;
 }
