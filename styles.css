@@ -292,6 +292,7 @@ textarea { resize: vertical; min-height: 72px; }
 }
 .bar-col.current .bar { background: var(--blue); }
 .bar-col.current .bar-value { color: var(--blue); font-weight: 600; }
+.bar-col.clickable-bar { cursor: pointer; }
 
 /* Version badge in the bottom-right corner */
 #versionBadge {

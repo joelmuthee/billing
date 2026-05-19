@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260519-10';
+const APP_VERSION = '20260519-11';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
 
 // Service catalogue, sourced from essenceautomations.com
@@ -1780,6 +1780,17 @@ function breakdownTableHtml(title, recurring, oneOff, recurringTotal, oneOffTota
     </div>
   `;
 }
+
+// Drill into one specific calendar month (used when clicking a bar in the chart)
+window.showMonthBreakdown = function (monthIso) {
+  const start = monthIso + '-01';
+  const end = lastDayOfMonth(monthIso);
+  const d = buildRevenueBreakdownData(start, end);
+  // Pretty title: "Revenue (May 2026)"
+  const [y, m] = monthIso.split('-').map(Number);
+  const label = new Date(y, m - 1, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+  openModal(breakdownTableHtml(`Revenue (${label})`, d.recurring, d.oneOff, d.recurringTotal, d.oneOffTotal, d.monthCount));
+};
 
 window.showRevenueBreakdown = function () {
   const { start, end } = periodRange(state.revenuePeriod);
