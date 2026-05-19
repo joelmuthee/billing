@@ -433,18 +433,14 @@ button.filter-pill.active .filter-count {
 }
 .card.no-pad { padding: 0; overflow: hidden; }
 .card-header { margin-bottom: 14px; }
-.card-header-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.card h2 { font-size: 1.05rem; letter-spacing: -0.4px; }
-
-/* Mini segmented control for card-level filters (3d / 7d / 30d etc.) */
-.seg-control.mini { padding: 2px; }
-.seg-control.mini button {
-  padding: 4px 9px;
-  font-size: 11.5px;
-  font-family: "Geist Mono", ui-monospace, monospace;
-  border-radius: 4px;
-  letter-spacing: 0.02em;
+.card-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
 }
+.card h2 { font-size: 1.05rem; letter-spacing: -0.4px; }
 
 /* KPI grid */
 .kpi-row {
