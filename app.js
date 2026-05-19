@@ -1580,10 +1580,10 @@ function renderBarChart() {
         const pct = (m.total / max) * 100;
         const isCurrent = m.key === todayMonth;
         return `
-          <div class="bar-col${isCurrent ? ' current' : ''}">
+          <div class="bar-col${isCurrent ? ' current' : ''}${m.total > 0 ? ' clickable-bar' : ''}" ${m.total > 0 ? `onclick="showMonthBreakdown('${m.key}')"` : ''}>
             <div class="bar-value">${m.total > 0 ? shortNum(m.total) : ''}</div>
             ${m.total > 0
-              ? `<div class="bar" style="height: ${pct}%; min-height: 4px;" title="${m.label}: ${fmtKES(m.total)}"></div>`
+              ? `<div class="bar" style="height: ${pct}%; min-height: 4px;" title="${m.label}: ${fmtKES(m.total)} — click to see breakdown"></div>`
               : `<div class="bar-spacer"></div>`}
             <div class="bar-label">${m.label}</div>
           </div>
