@@ -645,28 +645,101 @@ function renderClientsKpis() {
   const last12 = inSince(last12Start);
 
   $('#clientsKpiRow').innerHTML = `
-    <div class="kpi-card">
+    <div class="kpi-card clickable" onclick="showClientsAddedBreakdown('thisMonth')">
       <div class="kpi-label">Added this month</div>
       <div class="kpi-value">${thisMonth.length}</div>
       <div class="kpi-sub">${subLine(thisMonth)}</div>
+      <div class="breakdown-link">See breakdown →</div>
     </div>
-    <div class="kpi-card">
+    <div class="kpi-card clickable" onclick="showClientsAddedBreakdown('last3')">
       <div class="kpi-label">Last 3 months</div>
       <div class="kpi-value">${last3.length}</div>
       <div class="kpi-sub">${subLine(last3)}</div>
+      <div class="breakdown-link">See breakdown →</div>
     </div>
-    <div class="kpi-card">
+    <div class="kpi-card clickable" onclick="showClientsAddedBreakdown('last12')">
       <div class="kpi-label">Last 12 months</div>
       <div class="kpi-value">${last12.length}</div>
       <div class="kpi-sub">${subLine(last12)}</div>
+      <div class="breakdown-link">See breakdown →</div>
     </div>
-    <div class="kpi-card">
+    <div class="kpi-card clickable" onclick="showClientsAddedBreakdown('all')">
       <div class="kpi-label">All time</div>
       <div class="kpi-value">${state.clients.filter((c) => c.status !== 'churned').length}</div>
       <div class="kpi-sub">${subLine(state.clients.filter((c) => c.status !== 'churned'))}</div>
+      <div class="breakdown-link">See breakdown →</div>
     </div>
   `;
 }
+
+window.showClientsAddedBreakdown = function (period) {
+  const today = todayISO();
+  let startIso, periodLabel;
+  if (period === 'thisMonth') {
+    startIso = today.slice(0, 7) + '-01';
+    periodLabel = '(this month)';
+  } else if (period === 'last3') {
+    startIso = addMonthsISO(today, -3);
+    periodLabel = '(last 3 months)';
+  } else if (period === 'last12') {
+    startIso = addMonthsISO(today, -12);
+    periodLabel = '(last 12 months)';
+  } else {
+    startIso = '0000-01-01';
+    periodLabel = '(all time)';
+  }
+
+  const clients = state.clients
+    .filter((c) => c.start_date >= startIso && c.status !== 'churned')
+    .sort((a, b) => b.start_date.localeCompare(a.start_date));
+  const recurring = clients.filter((c) => c.plan === 'monthly' || c.plan === 'quarterly');
+  const oneOff = clients.filter((c) => c.plan === 'one-off');
+
+  const clientRow = (c) => `
+    <tr>
+      <td>
+        <div>${escapeHtml(c.name)}${c.business ? ` <span class="muted-2" style="font-weight:400;">· ${escapeHtml(c.business)}</span>` : ''}</div>
+        <div class="row-meta">${planLabel(c.plan)} · ${fmtKES(c.amount)}${c.plan !== 'one-off' ? '/period' : ''} · Started ${fmtDate(c.start_date)}</div>
+      </td>
+      <td class="num strong">${c.status === 'active' ? '<span class="status-paid">Active</span>' : `<span class="status-expected">${c.status}</span>`}</td>
+    </tr>
+  `;
+
+  const recurringSection = recurring.length ? `
+    <div class="breakdown-section">
+      <div class="breakdown-section-title">Recurring (${recurring.length})</div>
+      <table class="breakdown-table"><tbody>${recurring.map(clientRow).join('')}</tbody></table>
+    </div>
+  ` : '';
+
+  const oneOffSection = oneOff.length ? `
+    <div class="breakdown-section">
+      <div class="breakdown-section-title">One off (${oneOff.length})</div>
+      <table class="breakdown-table"><tbody>${oneOff.map(clientRow).join('')}</tbody></table>
+    </div>
+  ` : '';
+
+  const empty = clients.length === 0
+    ? '<p class="muted" style="text-align:center; padding:20px 0;">No clients added in this period.</p>'
+    : '';
+
+  openModal(`
+    <h2>Clients added ${periodLabel}</h2>
+    <p class="muted breakdown-note">Clients are placed in a period by their <code>start_date</code> — the actual relationship start, not when the row was created in this dashboard.</p>
+    ${empty}
+    ${recurringSection}
+    ${oneOffSection}
+    ${clients.length > 0 ? `
+      <div class="breakdown-total">
+        <span>Total</span>
+        <span class="num">${clients.length}</span>
+      </div>
+    ` : ''}
+    <div class="modal-actions">
+      <button type="button" class="btn-primary" onclick="closeModal()">Close</button>
+    </div>
+  `);
+};
 
 function renderClientFilter() {
   const all = state.clients.length;
