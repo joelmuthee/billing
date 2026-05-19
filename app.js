@@ -965,17 +965,52 @@ window.editExpense = function (id) {
   });
 };
 
-window.deleteExpense = async function (id) {
+window.deleteExpense = function (id) {
   const e = state.expenses.find((x) => x.id === id);
   if (!e) return;
-  if (!confirm(`Delete ${e.name}? This also deletes all its payment history.`)) return;
-  try {
-    await api(`/api/expenses/${id}`, { method: 'DELETE' });
-    await loadData();
-    toast('Expense deleted');
-  } catch (err) {
-    toast(err.message, 'error');
-  }
+  const payCount = state.expense_payments.filter((p) => p.expense_id === id).length;
+  const totalPaid = state.expense_payments
+    .filter((p) => p.expense_id === id)
+    .reduce((s, p) => s + p.amount, 0);
+
+  openModal(`
+    <h2 style="color: var(--red);">Delete ${escapeHtml(e.name)}?</h2>
+    <p class="muted" style="margin-bottom:14px;">This permanently removes:</p>
+    <ul class="muted" style="margin: 0 0 14px 20px; font-size: 14px; line-height: 1.7;">
+      <li>The expense record</li>
+      <li>${payCount} payment record${payCount === 1 ? '' : 's'}${totalPaid > 0 ? ` totalling ${fmtKES(totalPaid)}` : ''}</li>
+    </ul>
+    <p class="muted" style="margin-bottom:14px;">This can't be undone. If you just want to stop the recurrence, edit it and set status to <strong>Cancelled</strong> instead.</p>
+    <form id="deleteExpenseForm">
+      <label>
+        <span>Type <strong style="font-family: 'Geist Mono', monospace;">${escapeHtml(e.name)}</strong> to confirm</span>
+        <input type="text" id="deleteExpConfirmInput" autocomplete="off" autofocus>
+      </label>
+      <div class="modal-actions">
+        <button type="button" class="btn-ghost" onclick="closeModal()">Cancel</button>
+        <button type="submit" class="btn-danger-solid" id="deleteExpConfirmBtn" disabled>Delete expense</button>
+      </div>
+    </form>
+  `);
+  const input = $('#deleteExpConfirmInput');
+  const btn = $('#deleteExpConfirmBtn');
+  input.addEventListener('input', () => {
+    btn.disabled = input.value.trim() !== e.name;
+  });
+  $('#deleteExpenseForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    if (input.value.trim() !== e.name) return;
+    btn.disabled = true;
+    try {
+      await api(`/api/expenses/${id}`, { method: 'DELETE' });
+      await loadData();
+      closeModal();
+      toast(`${e.name} deleted`);
+    } catch (err) {
+      btn.disabled = false;
+      toast(err.message, 'error');
+    }
+  });
 };
 
 function expensePaymentFormHtml(preselect) {
@@ -1623,17 +1658,54 @@ window.editClient = function (id) {
   });
 };
 
-window.deleteClient = async function (id) {
+window.deleteClient = function (id) {
   const c = state.clients.find((x) => x.id === id);
   if (!c) return;
-  if (!confirm(`Delete ${c.name}? This also deletes all their payments.`)) return;
-  try {
-    await api(`/api/clients/${id}`, { method: 'DELETE' });
-    await loadData();
-    toast('Client deleted');
-  } catch (err) {
-    toast(err.message, 'error');
-  }
+  const paymentCount = state.payments.filter((p) => p.client_id === id).length;
+  const scheduledCount = state.scheduled_payments.filter((s) => s.client_id === id).length;
+  const totalReceived = state.payments
+    .filter((p) => p.client_id === id)
+    .reduce((s, p) => s + p.amount, 0);
+
+  openModal(`
+    <h2 style="color: var(--red);">Delete ${escapeHtml(c.name)}?</h2>
+    <p class="muted" style="margin-bottom:14px;">This permanently removes:</p>
+    <ul class="muted" style="margin: 0 0 14px 20px; font-size: 14px; line-height: 1.7;">
+      <li>The client record itself</li>
+      <li>${paymentCount} payment record${paymentCount === 1 ? '' : 's'}${totalReceived > 0 ? ` totalling ${fmtKES(totalReceived)}` : ''}</li>
+      ${scheduledCount > 0 ? `<li>${scheduledCount} scheduled payment${scheduledCount === 1 ? '' : 's'}</li>` : ''}
+    </ul>
+    <p class="muted" style="margin-bottom:14px;">This can't be undone. If you just want to stop tracking them, edit the client and set status to <strong>Churned</strong> instead.</p>
+    <form id="deleteClientForm">
+      <label>
+        <span>Type <strong style="font-family: 'Geist Mono', monospace;">${escapeHtml(c.name)}</strong> to confirm</span>
+        <input type="text" id="deleteConfirmInput" autocomplete="off" autofocus>
+      </label>
+      <div class="modal-actions">
+        <button type="button" class="btn-ghost" onclick="closeModal()">Cancel</button>
+        <button type="submit" class="btn-danger-solid" id="deleteConfirmBtn" disabled>Delete client</button>
+      </div>
+    </form>
+  `);
+  const input = $('#deleteConfirmInput');
+  const btn = $('#deleteConfirmBtn');
+  input.addEventListener('input', () => {
+    btn.disabled = input.value.trim() !== c.name;
+  });
+  $('#deleteClientForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (input.value.trim() !== c.name) return;
+    btn.disabled = true;
+    try {
+      await api(`/api/clients/${id}`, { method: 'DELETE' });
+      await loadData();
+      closeModal();
+      toast(`${c.name} deleted`);
+    } catch (err) {
+      btn.disabled = false;
+      toast(err.message, 'error');
+    }
+  });
 };
 
 function paymentFormHtml(preselect, opts) {
