@@ -254,6 +254,26 @@ textarea { resize: vertical; min-height: 72px; }
   line-height: 1.55;
   box-shadow: rgba(0,0,0,0.06) 0px -1px 0px 0px inset;
 }
+.breakdown-cutoff {
+  background: var(--amber-soft);
+  color: var(--amber);
+  font-size: 12.5px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  margin-bottom: 18px;
+  line-height: 1.5;
+  box-shadow: var(--shadow-light);
+}
+.chart-footnote {
+  font-size: 11.5px;
+  color: var(--muted);
+  margin-top: 8px;
+  font-style: italic;
+  line-height: 1.5;
+}
+.bar-col.projected .bar { opacity: 0.35; }
+.bar-col.projected .bar-value,
+.bar-col.projected .bar-label { opacity: 0.5; }
 .breakdown-section { margin-bottom: 22px; }
 .breakdown-section-title {
   font-family: "Geist Mono", ui-monospace, monospace;

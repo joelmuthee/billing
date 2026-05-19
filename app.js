@@ -6,6 +6,11 @@ const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
 
+// Dashboard was built and seeded in May 2026. Anything before this date is
+// projected from current client config and may not reflect historical reality
+// (since old clients/expenses weren't tracked day by day).
+const REPORTING_STARTED = '2026-05-01';
+
 // Service catalogue, sourced from essenceautomations.com
 const SERVICES_CATEGORIES = [
   { name: 'Get Found', items: [
@@ -1561,8 +1566,12 @@ function paymentStatusLabel(r) {
   return `<span class="status-expected">Expected</span>`;
 }
 
-function breakdownTableHtml(title, recurring, oneOff, recurringTotal, oneOffTotal, monthCount) {
+function breakdownTableHtml(title, recurring, oneOff, recurringTotal, oneOffTotal, monthCount, startIso) {
   const showMonthsCol = monthCount > 1;
+  const crossesCutoff = startIso && startIso < REPORTING_STARTED;
+  const cutoffNote = crossesCutoff
+    ? `<div class="breakdown-cutoff">⚠ Accurate tracking started ${fmtDate(REPORTING_STARTED)}. Numbers before that date are projected from current client setup and may not match what actually happened.</div>`
+    : '';
   const recurringSection = recurring.length ? `
     <div class="breakdown-section">
       <div class="breakdown-section-title">Recurring (smoothed)</div>
@@ -1611,6 +1620,7 @@ function breakdownTableHtml(title, recurring, oneOff, recurringTotal, oneOffTota
   return `
     <h2>${title}</h2>
     <p class="muted breakdown-note">Recurring contributions are smoothed (quarterly ÷ 3) across active months. One-offs count as actual cash on the date paid.</p>
+    ${cutoffNote}
     ${emptyState}
     ${recurringSection}
     ${oneOffSection}
@@ -1629,13 +1639,13 @@ function breakdownTableHtml(title, recurring, oneOff, recurringTotal, oneOffTota
 window.showRevenueBreakdown = function () {
   const { start, end } = periodRange(state.revenuePeriod);
   const d = buildRevenueBreakdownData(start, end);
-  openModal(breakdownTableHtml(`Revenue ${periodWord(state.revenuePeriod)}`, d.recurring, d.oneOff, d.recurringTotal, d.oneOffTotal, d.monthCount));
+  openModal(breakdownTableHtml(`Revenue ${periodWord(state.revenuePeriod)}`, d.recurring, d.oneOff, d.recurringTotal, d.oneOffTotal, d.monthCount, start));
 };
 
 window.showExpenseBreakdown = function () {
   const { start, end } = periodRange(state.revenuePeriod);
   const d = buildExpenseBreakdownData(start, end);
-  openModal(breakdownTableHtml(`Expenses ${periodWord(state.revenuePeriod)}`, d.recurring, d.oneOff, d.recurringTotal, d.oneOffTotal, d.monthCount));
+  openModal(breakdownTableHtml(`Expenses ${periodWord(state.revenuePeriod)}`, d.recurring, d.oneOff, d.recurringTotal, d.oneOffTotal, d.monthCount, start));
 };
 
 // Segmented period control
