@@ -1424,21 +1424,26 @@ function renderBarChart() {
   }
   const max = Math.max(...months.map((m) => m.total), 1);
 
+  const reportingMonth = REPORTING_STARTED.slice(0, 7);
+  const hasPreReporting = months.some((m) => m.key < reportingMonth);
+
   $('#revenueChart').innerHTML = `
     <div class="bar-chart">
       ${months.map((m) => {
         const pct = (m.total / max) * 100;
+        const isProjected = m.key < reportingMonth;
         return `
-          <div class="bar-col">
+          <div class="bar-col${isProjected ? ' projected' : ''}">
             <div class="bar-value">${m.total > 0 ? shortNum(m.total) : ''}</div>
             ${m.total > 0
-              ? `<div class="bar" style="height: ${pct}%; min-height: 4px;" title="${m.label}: ${fmtKES(m.total)}"></div>`
+              ? `<div class="bar" style="height: ${pct}%; min-height: 4px;" title="${m.label}: ${fmtKES(m.total)}${isProjected ? ' (projected, pre-tracking)' : ''}"></div>`
               : `<div class="bar-spacer"></div>`}
             <div class="bar-label">${m.label}</div>
           </div>
         `;
       }).join('')}
     </div>
+    ${hasPreReporting ? `<p class="chart-footnote">Lighter bars before ${fmtDate(REPORTING_STARTED)} are projected from current client setup. Day-by-day tracking started that date.</p>` : ''}
   `;
 }
 
