@@ -931,58 +931,151 @@ window.deleteExpensePayment = async function (id) {
 
 // ────────── Revenue tab ──────────
 
+// Period boundaries snap to calendar-month starts so accrual math is clean.
 function periodStart(period) {
   const today = parseISO(todayISO());
-  if (period === '30d') return new Date(today.getTime() - 30 * 86400000).toISOString().slice(0, 10);
+  const ymToISO = (y, m) => `${y}-${String(m + 1).padStart(2, '0')}-01`;
+  if (period === '30d') return ymToISO(today.getFullYear(), today.getMonth());
   if (period === '6mo') {
     const d = new Date(today);
-    d.setMonth(d.getMonth() - 6);
-    return d.toISOString().slice(0, 10);
+    d.setMonth(d.getMonth() - 5);
+    return ymToISO(d.getFullYear(), d.getMonth());
   }
   if (period === '1yr') {
     const d = new Date(today);
-    d.setFullYear(d.getFullYear() - 1);
-    return d.toISOString().slice(0, 10);
+    d.setMonth(d.getMonth() - 11);
+    return ymToISO(d.getFullYear(), d.getMonth());
   }
   return '0000-01-01';
+}
+
+// ────────── Accrual helpers ──────────
+// "Accrual" = smooth quarterly billings across 3 months, count income for the
+// period a client was active even if cash hasn't actually landed yet.
+
+function lastDayOfMonth(yyyymm) {
+  const [y, m] = yyyymm.split('-').map(Number);
+  return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+}
+function nextMonth(yyyymm) {
+  const [y, m] = yyyymm.split('-').map(Number);
+  return new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 7);
+}
+function monthsInPeriod(startIso, endIso) {
+  const months = [];
+  let cursor = startIso.slice(0, 7);
+  const endMonth = endIso.slice(0, 7);
+  while (cursor <= endMonth) {
+    months.push(cursor);
+    cursor = nextMonth(cursor);
+  }
+  return months;
+}
+
+function clientMonthlyContribution(c) {
+  if (c.plan === 'monthly') return c.amount;
+  if (c.plan === 'quarterly') return c.amount / 3;
+  return 0; // one-off handled via actual payments
+}
+function expenseMonthlyContribution(e) {
+  if (e.plan === 'monthly') return e.amount;
+  if (e.plan === 'quarterly') return e.amount / 3;
+  return 0;
+}
+
+// For current/future months: only `active` status counts.
+// For past months: include `active` + `paused` (we don't track when status
+// changed, so we assume past months had them on).
+function entityActiveInMonth(entity, monthIso) {
+  const monthEnd = lastDayOfMonth(monthIso);
+  if (entity.start_date > monthEnd) return false;
+  const todayMonth = todayISO().slice(0, 7);
+  if (monthIso >= todayMonth) return entity.status === 'active';
+  return entity.status === 'active' || entity.status === 'paused';
+}
+
+function accrualRevenueForMonth(monthIso) {
+  let total = 0;
+  for (const c of state.clients) {
+    if (c.plan === 'one-off') continue;
+    if (!entityActiveInMonth(c, monthIso)) continue;
+    total += clientMonthlyContribution(c);
+  }
+  const monthStart = monthIso + '-01';
+  const monthEnd = lastDayOfMonth(monthIso);
+  for (const p of state.payments) {
+    const c = state.clients.find((x) => x.id === p.client_id);
+    if (c && c.plan === 'one-off' && p.paid_on >= monthStart && p.paid_on <= monthEnd) {
+      total += p.amount;
+    }
+  }
+  return total;
+}
+
+function accrualExpenseForMonth(monthIso) {
+  let total = 0;
+  for (const e of state.expenses) {
+    if (e.plan === 'one-off') continue;
+    if (!entityActiveInMonth(e, monthIso)) continue;
+    total += expenseMonthlyContribution(e);
+  }
+  const monthStart = monthIso + '-01';
+  const monthEnd = lastDayOfMonth(monthIso);
+  for (const p of state.expense_payments) {
+    const e = state.expenses.find((x) => x.id === p.expense_id);
+    if (e && e.plan === 'one-off' && p.paid_on >= monthStart && p.paid_on <= monthEnd) {
+      total += p.amount;
+    }
+  }
+  return total;
+}
+
+function accrualRevenueForPeriod(startIso) {
+  return monthsInPeriod(startIso, todayISO()).reduce((s, m) => s + accrualRevenueForMonth(m), 0);
+}
+function accrualExpenseForPeriod(startIso) {
+  return monthsInPeriod(startIso, todayISO()).reduce((s, m) => s + accrualExpenseForMonth(m), 0);
+}
+
+function clientPeriodAccrual(c, startIso) {
+  let total = 0;
+  if (c.plan !== 'one-off') {
+    for (const m of monthsInPeriod(startIso, todayISO())) {
+      if (entityActiveInMonth(c, m)) total += clientMonthlyContribution(c);
+    }
+  } else {
+    state.payments
+      .filter((p) => p.client_id === c.id && p.paid_on >= startIso)
+      .forEach((p) => { total += p.amount; });
+  }
+  return total;
 }
 
 function renderRevenue() {
   const p = state.revenuePeriod;
   const start = periodStart(p);
-  const inPeriod = state.payments.filter((x) => x.paid_on >= start);
-  const expensesInPeriod = state.expense_payments.filter((x) => x.paid_on >= start);
-  const total = inPeriod.reduce((s, x) => s + x.amount, 0);
-  const totalExpenses = expensesInPeriod.reduce((s, x) => s + x.amount, 0);
+  const total = accrualRevenueForPeriod(start);
+  const totalExpenses = accrualExpenseForPeriod(start);
   const net = total - totalExpenses;
 
-  const monthlyMrr = state.clients
-    .filter((c) => c.status === 'active' && c.plan === 'monthly')
-    .reduce((s, c) => s + c.amount, 0);
-  const quarterlyMrr = state.clients
-    .filter((c) => c.status === 'active' && c.plan === 'quarterly')
-    .reduce((s, c) => s + c.amount / 3, 0);
-  const mrr = monthlyMrr + quarterlyMrr;
-
-  const monthlyBurn = state.expenses
-    .filter((e) => e.status === 'active' && e.plan === 'monthly')
-    .reduce((s, e) => s + e.amount, 0);
-  const quarterlyBurn = state.expenses
-    .filter((e) => e.status === 'active' && e.plan === 'quarterly')
-    .reduce((s, e) => s + e.amount / 3, 0);
-  const burn = monthlyBurn + quarterlyBurn;
+  const mrr = state.clients
+    .filter((c) => c.status === 'active' && c.plan !== 'one-off')
+    .reduce((s, c) => s + clientMonthlyContribution(c), 0);
+  const burn = state.expenses
+    .filter((e) => e.status === 'active' && e.plan !== 'one-off')
+    .reduce((s, e) => s + expenseMonthlyContribution(e), 0);
   const netMonthly = mrr - burn;
 
   $('#revenueSummary').innerHTML = `
     <div class="kpi-card">
       <div class="kpi-label">Revenue ${periodWord(p)}</div>
       <div class="kpi-value">${fmtKES(total)}</div>
-      <div class="kpi-sub">${inPeriod.length} payments in</div>
+      <div class="kpi-sub">expected (quarterly /3)</div>
     </div>
     <div class="kpi-card">
       <div class="kpi-label">Expenses ${periodWord(p)}</div>
       <div class="kpi-value">${fmtKES(totalExpenses)}</div>
-      <div class="kpi-sub">${expensesInPeriod.length} payments out</div>
+      <div class="kpi-sub">expected</div>
     </div>
     <div class="kpi-card">
       <div class="kpi-label">Net ${periodWord(p)}</div>
@@ -997,11 +1090,11 @@ function renderRevenue() {
   `;
 
   renderBarChart();
-  renderTopClients(inPeriod);
+  renderTopClients(start);
 }
 
 function periodWord(p) {
-  if (p === '30d') return '(30 days)';
+  if (p === '30d') return '(this month)';
   if (p === '6mo') return '(6 months)';
   if (p === '1yr') return '(12 months)';
   return '(all time)';
@@ -1020,11 +1113,9 @@ function renderBarChart() {
     const key = d.toISOString().slice(0, 7);
     months.push({ key, label: d.toLocaleDateString('en-GB', { month: 'short' }), total: 0 });
   }
-  state.payments.forEach((p) => {
-    const k = p.paid_on.slice(0, 7);
-    const m = months.find((x) => x.key === k);
-    if (m) m.total += p.amount;
-  });
+  for (const m of months) {
+    m.total = accrualRevenueForMonth(m.key);
+  }
   const max = Math.max(...months.map((m) => m.total), 1);
 
   $('#revenueChart').innerHTML = `
@@ -1051,22 +1142,16 @@ function shortNum(n) {
   return String(n);
 }
 
-function renderTopClients(payments) {
-  const byClient = {};
-  payments.forEach((p) => {
-    byClient[p.client_id] = (byClient[p.client_id] || 0) + p.amount;
-  });
-  const rows = Object.entries(byClient)
-    .map(([id, total]) => {
-      const c = state.clients.find((x) => x.id === Number(id));
-      return { name: c ? c.name : 'Unknown', total };
-    })
+function renderTopClients(startIso) {
+  const rows = state.clients
+    .map((c) => ({ name: c.name, total: clientPeriodAccrual(c, startIso) }))
+    .filter((r) => r.total > 0)
     .sort((a, b) => b.total - a.total)
     .slice(0, 10);
 
   const el = $('#topClients');
   if (rows.length === 0) {
-    el.innerHTML = '<div class="empty">No payments in this period.</div>';
+    el.innerHTML = '<div class="empty">No clients active in this period.</div>';
     return;
   }
   el.innerHTML = rows.map((r) => `
