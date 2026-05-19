@@ -1,0 +1,13 @@
+# Cloudflare Pages headers config.
+# Don't cache the entry files — the app.js + /api/data interaction is too
+# brittle to ride a 4-hour browser cache. Files are tiny, refetch cost is
+# negligible.
+
+/index.html
+  Cache-Control: no-cache, must-revalidate
+
+/app.js
+  Cache-Control: no-cache, must-revalidate
+
+/styles.css
+  Cache-Control: no-cache, must-revalidate
