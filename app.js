@@ -11,6 +11,8 @@ const state = {
   token: localStorage.getItem('cd_token') || '',
   clients: [],
   payments: [],
+  expenses: [],
+  expense_payments: [],
   activeTab: 'dashboard',
   revenuePeriod: '30d',
 };
@@ -105,6 +107,8 @@ async function loadData() {
   const data = await api('/api/data');
   state.clients = data.clients || [];
   state.payments = data.payments || [];
+  state.expenses = data.expenses || [];
+  state.expense_payments = data.expense_payments || [];
   renderAll();
 }
 
@@ -199,6 +203,7 @@ function renderAll() {
   renderRecent();
   renderClientsList();
   renderPaymentsList();
+  renderExpenses();
   if (state.activeTab === 'revenue') renderRevenue();
 }
 
@@ -501,6 +506,329 @@ function renderPaymentsList() {
   }).join('');
 }
 
+// ────────── Expenses tab ──────────
+
+function renderExpenses() {
+  renderExpenseKpis();
+  renderExpensesList();
+  renderRecentExpensePayments();
+}
+
+function renderExpenseKpis() {
+  const monthlyBurn = state.expenses
+    .filter((e) => e.status === 'active' && e.plan === 'monthly')
+    .reduce((s, e) => s + e.amount, 0);
+  const quarterlyBurn = state.expenses
+    .filter((e) => e.status === 'active' && e.plan === 'quarterly')
+    .reduce((s, e) => s + e.amount / 3, 0);
+  const burn = monthlyBurn + quarterlyBurn;
+
+  const today = todayISO();
+  const monthStart = today.slice(0, 7) + '-01';
+  const monthSpent = state.expense_payments
+    .filter((p) => p.paid_on >= monthStart && p.paid_on <= today)
+    .reduce((s, p) => s + p.amount, 0);
+
+  const activeCount = state.expenses.filter((e) => e.status === 'active').length;
+
+  $('#expenseKpis').innerHTML = `
+    <div class="kpi-card">
+      <div class="kpi-label">Monthly burn</div>
+      <div class="kpi-value">${fmtKES(burn)}</div>
+      <div class="kpi-sub">${activeCount} active</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Paid this month</div>
+      <div class="kpi-value">${fmtKES(monthSpent)}</div>
+      <div class="kpi-sub">${state.expense_payments.filter((p) => p.paid_on >= monthStart).length} payments</div>
+    </div>
+  `;
+}
+
+function renderExpensesList() {
+  const el = $('#expensesList');
+  if (state.expenses.length === 0) {
+    el.innerHTML = '<div class="empty">No expenses yet. Add your first one.</div>';
+    return;
+  }
+  const sorted = [...state.expenses].sort((a, b) => {
+    const sa = a.status === 'active' ? 0 : 1;
+    const sb = b.status === 'active' ? 0 : 1;
+    if (sa !== sb) return sa - sb;
+    return a.name.localeCompare(b.name);
+  });
+  el.innerHTML = sorted.map((e) => {
+    const overdue = e.status === 'active' && e.next_due && e.next_due < todayISO();
+    return `
+      <div class="list-row">
+        <div>
+          <div class="primary">${escapeHtml(e.name)}${e.category ? ` <span class="muted-2" style="font-weight:400;">· ${escapeHtml(e.category)}</span>` : ''}</div>
+          <div class="sub">
+            <span class="badge plan-${e.plan}">${planLabel(e.plan)}</span>
+            ${e.status !== 'active' ? `<span class="badge muted">${e.status}</span>` : ''}
+            ${overdue ? `<span class="badge danger">Overdue</span>` : ''}
+            ${e.next_due ? `<span>Next due ${fmtDate(e.next_due)}</span>` : `<span>${e.plan === 'one-off' ? 'One off' : 'No due date'}</span>`}
+          </div>
+        </div>
+        <div class="actions">
+          <div class="amount num">${fmtKES(e.amount)}</div>
+          <button class="btn-sm" onclick="logExpensePayment(${e.id})">Pay</button>
+          <button class="btn-sm" onclick="editExpense(${e.id})">Edit</button>
+          <button class="btn-sm danger" onclick="deleteExpense(${e.id})">Delete</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderRecentExpensePayments() {
+  const recent = state.expense_payments.slice(0, 10);
+  const el = $('#recentExpensePayments');
+  if (recent.length === 0) {
+    el.innerHTML = '<div class="empty">No expense payments recorded yet.</div>';
+    return;
+  }
+  el.innerHTML = recent.map((p) => {
+    const e = state.expenses.find((x) => x.id === p.expense_id);
+    return `
+      <div class="list-row">
+        <div>
+          <div class="primary">${escapeHtml(e ? e.name : 'Unknown expense')}</div>
+          <div class="sub">
+            ${p.method ? `<span class="badge muted">${methodLabel(p.method)}</span>` : ''}
+            ${p.reference ? `<span class="mono">Ref ${escapeHtml(p.reference)}</span>` : ''}
+            <span class="date">${fmtDate(p.paid_on)}</span>
+          </div>
+        </div>
+        <div class="actions">
+          <div class="amount num">${fmtKES(p.amount)}</div>
+          <button class="btn-sm danger" onclick="deleteExpensePayment(${p.id})">Delete</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function expenseFormHtml(e) {
+  const isEdit = !!e;
+  return `
+    <h2>${isEdit ? 'Edit expense' : 'Add expense'}</h2>
+    <form id="expenseForm">
+      <label>
+        <span>Name</span>
+        <input type="text" name="name" required value="${isEdit ? escapeAttr(e.name) : ''}" autofocus>
+      </label>
+      <div class="form-row">
+        <label>
+          <span>Category <span class="hint">(optional)</span></span>
+          <input type="text" name="category" placeholder="subscription, tools, rent…" value="${isEdit && e.category ? escapeAttr(e.category) : ''}">
+        </label>
+        <label>
+          <span>Amount (Ksh)</span>
+          <input type="number" name="amount" min="0" step="1" value="${isEdit ? e.amount : ''}" required>
+        </label>
+      </div>
+      <div class="form-row">
+        <label>
+          <span>Plan</span>
+          <select name="plan" required>
+            <option value="monthly" ${!isEdit || e.plan === 'monthly' ? 'selected' : ''}>Monthly</option>
+            <option value="quarterly" ${isEdit && e.plan === 'quarterly' ? 'selected' : ''}>Every 3 months</option>
+            <option value="one-off" ${isEdit && e.plan === 'one-off' ? 'selected' : ''}>One off</option>
+          </select>
+        </label>
+        <label>
+          <span>Payment method</span>
+          <select name="method">
+            <option value="">—</option>
+            <option value="mpesa" ${isEdit && e.method === 'mpesa' ? 'selected' : ''}>Mpesa</option>
+            <option value="card" ${isEdit && e.method === 'card' ? 'selected' : ''}>Card</option>
+            <option value="bank" ${isEdit && e.method === 'bank' ? 'selected' : ''}>Bank</option>
+            <option value="cash" ${isEdit && e.method === 'cash' ? 'selected' : ''}>Cash</option>
+            <option value="cheque" ${isEdit && e.method === 'cheque' ? 'selected' : ''}>Cheque</option>
+          </select>
+        </label>
+      </div>
+      <div class="form-row">
+        <label>
+          <span>Start date</span>
+          <input type="date" name="start_date" required value="${isEdit ? e.start_date : todayISO()}">
+        </label>
+        <label>
+          <span>Next due <span class="hint">(auto from start if blank)</span></span>
+          <input type="date" name="next_due" value="${isEdit && e.next_due ? e.next_due : ''}">
+        </label>
+      </div>
+      ${isEdit ? `
+        <label>
+          <span>Status</span>
+          <select name="status">
+            <option value="active" ${e.status === 'active' ? 'selected' : ''}>Active</option>
+            <option value="paused" ${e.status === 'paused' ? 'selected' : ''}>Paused</option>
+            <option value="cancelled" ${e.status === 'cancelled' ? 'selected' : ''}>Cancelled</option>
+            <option value="completed" ${e.status === 'completed' ? 'selected' : ''}>Completed</option>
+          </select>
+        </label>
+      ` : ''}
+      <label>
+        <span>Notes <span class="hint">(optional)</span></span>
+        <textarea name="notes">${isEdit && e.notes ? escapeHtml(e.notes) : ''}</textarea>
+      </label>
+      <p class="error hidden" id="expenseFormErr"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn-ghost" onclick="closeModal()">Cancel</button>
+        <button type="submit" class="btn-primary">${isEdit ? 'Save changes' : 'Add expense'}</button>
+      </div>
+    </form>
+  `;
+}
+
+window.editExpense = function (id) {
+  const e = id != null ? state.expenses.find((x) => x.id === id) : null;
+  openModal(expenseFormHtml(e));
+  $('#expenseForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const fd = new FormData(ev.target);
+    const body = {
+      name: fd.get('name').trim(),
+      category: (fd.get('category') || '').trim() || null,
+      amount: Number(fd.get('amount')) || 0,
+      plan: fd.get('plan'),
+      method: fd.get('method') || null,
+      start_date: fd.get('start_date'),
+      next_due: fd.get('next_due') || null,
+      notes: (fd.get('notes') || '').trim() || null,
+      status: fd.get('status') || 'active',
+    };
+    try {
+      if (e) await api(`/api/expenses/${e.id}`, { method: 'PUT', body: JSON.stringify(body) });
+      else await api('/api/expenses', { method: 'POST', body: JSON.stringify(body) });
+      await loadData();
+      closeModal();
+      toast(e ? 'Expense updated' : 'Expense added');
+    } catch (err) {
+      const errEl = $('#expenseFormErr');
+      errEl.textContent = err.message;
+      errEl.classList.remove('hidden');
+    }
+  });
+};
+
+window.deleteExpense = async function (id) {
+  const e = state.expenses.find((x) => x.id === id);
+  if (!e) return;
+  if (!confirm(`Delete ${e.name}? This also deletes all its payment history.`)) return;
+  try {
+    await api(`/api/expenses/${id}`, { method: 'DELETE' });
+    await loadData();
+    toast('Expense deleted');
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+};
+
+function expensePaymentFormHtml(preselect) {
+  const opts = state.expenses
+    .filter((e) => e.status === 'active' || e.id === (preselect && preselect.id))
+    .map((e) => `<option value="${e.id}" ${preselect && preselect.id === e.id ? 'selected' : ''}>${escapeAttr(e.name)} — ${fmtKES(e.amount)}</option>`)
+    .join('');
+  const amount = preselect ? preselect.amount : '';
+  const method = preselect && preselect.method ? preselect.method : '';
+  return `
+    <h2>Log expense payment</h2>
+    <form id="expensePaymentForm">
+      <label>
+        <span>Expense</span>
+        <select name="expense_id" required>
+          <option value="">Pick an expense…</option>
+          ${opts}
+        </select>
+      </label>
+      <div class="form-row">
+        <label>
+          <span>Amount (Ksh)</span>
+          <input type="number" name="amount" min="1" step="1" required value="${amount}" autofocus>
+        </label>
+        <label>
+          <span>Paid on</span>
+          <input type="date" name="paid_on" required value="${todayISO()}">
+        </label>
+      </div>
+      <div class="form-row">
+        <label>
+          <span>Method</span>
+          <select name="method">
+            <option value="">—</option>
+            <option value="mpesa" ${method === 'mpesa' ? 'selected' : ''}>Mpesa</option>
+            <option value="card" ${method === 'card' ? 'selected' : ''}>Card</option>
+            <option value="bank" ${method === 'bank' ? 'selected' : ''}>Bank</option>
+            <option value="cash" ${method === 'cash' ? 'selected' : ''}>Cash</option>
+            <option value="cheque" ${method === 'cheque' ? 'selected' : ''}>Cheque</option>
+          </select>
+        </label>
+        <label>
+          <span>Reference <span class="hint">(receipt, txn id)</span></span>
+          <input type="text" name="reference">
+        </label>
+      </div>
+      <label>
+        <span>Notes <span class="hint">(optional)</span></span>
+        <textarea name="notes"></textarea>
+      </label>
+      <p class="error hidden" id="expensePayFormErr"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn-ghost" onclick="closeModal()">Cancel</button>
+        <button type="submit" class="btn-primary">Log payment</button>
+      </div>
+    </form>
+  `;
+}
+
+window.logExpensePayment = function (expenseId) {
+  const preselect = expenseId != null ? state.expenses.find((e) => e.id === expenseId) : null;
+  openModal(expensePaymentFormHtml(preselect));
+  $('#expensePaymentForm select[name="expense_id"]').addEventListener('change', (ev) => {
+    const e = state.expenses.find((x) => x.id === Number(ev.target.value));
+    if (e) {
+      $('#expensePaymentForm input[name="amount"]').value = e.amount;
+      if (e.method) $('#expensePaymentForm select[name="method"]').value = e.method;
+    }
+  });
+  $('#expensePaymentForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const fd = new FormData(ev.target);
+    const body = {
+      expense_id: Number(fd.get('expense_id')),
+      amount: Number(fd.get('amount')) || 0,
+      paid_on: fd.get('paid_on'),
+      method: fd.get('method') || null,
+      reference: (fd.get('reference') || '').trim() || null,
+      notes: (fd.get('notes') || '').trim() || null,
+    };
+    try {
+      await api('/api/expense-payments', { method: 'POST', body: JSON.stringify(body) });
+      await loadData();
+      closeModal();
+      toast('Expense payment logged');
+    } catch (err) {
+      const errEl = $('#expensePayFormErr');
+      errEl.textContent = err.message;
+      errEl.classList.remove('hidden');
+    }
+  });
+};
+
+window.deleteExpensePayment = async function (id) {
+  if (!confirm('Delete this expense payment record? Does not reverse the next-due bump.')) return;
+  try {
+    await api(`/api/expense-payments/${id}`, { method: 'DELETE' });
+    await loadData();
+    toast('Expense payment deleted');
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+};
+
 // ────────── Revenue tab ──────────
 
 function periodStart(period) {
@@ -523,13 +851,10 @@ function renderRevenue() {
   const p = state.revenuePeriod;
   const start = periodStart(p);
   const inPeriod = state.payments.filter((x) => x.paid_on >= start);
+  const expensesInPeriod = state.expense_payments.filter((x) => x.paid_on >= start);
   const total = inPeriod.reduce((s, x) => s + x.amount, 0);
-
-  const recurringClientIds = new Set(
-    state.clients.filter((c) => c.plan === 'monthly' || c.plan === 'quarterly').map((c) => c.id)
-  );
-  const recurring = inPeriod.filter((x) => recurringClientIds.has(x.client_id)).reduce((s, x) => s + x.amount, 0);
-  const oneOff = total - recurring;
+  const totalExpenses = expensesInPeriod.reduce((s, x) => s + x.amount, 0);
+  const net = total - totalExpenses;
 
   const monthlyMrr = state.clients
     .filter((c) => c.status === 'active' && c.plan === 'monthly')
@@ -539,26 +864,35 @@ function renderRevenue() {
     .reduce((s, c) => s + c.amount / 3, 0);
   const mrr = monthlyMrr + quarterlyMrr;
 
+  const monthlyBurn = state.expenses
+    .filter((e) => e.status === 'active' && e.plan === 'monthly')
+    .reduce((s, e) => s + e.amount, 0);
+  const quarterlyBurn = state.expenses
+    .filter((e) => e.status === 'active' && e.plan === 'quarterly')
+    .reduce((s, e) => s + e.amount / 3, 0);
+  const burn = monthlyBurn + quarterlyBurn;
+  const netMonthly = mrr - burn;
+
   $('#revenueSummary').innerHTML = `
     <div class="kpi-card">
-      <div class="kpi-label">Total ${periodWord(p)}</div>
+      <div class="kpi-label">Revenue ${periodWord(p)}</div>
       <div class="kpi-value">${fmtKES(total)}</div>
-      <div class="kpi-sub">${inPeriod.length} payments</div>
+      <div class="kpi-sub">${inPeriod.length} payments in</div>
     </div>
     <div class="kpi-card">
-      <div class="kpi-label">Recurring</div>
-      <div class="kpi-value">${fmtKES(recurring)}</div>
-      <div class="kpi-sub">${pct(recurring, total)}% of total</div>
+      <div class="kpi-label">Expenses ${periodWord(p)}</div>
+      <div class="kpi-value">${fmtKES(totalExpenses)}</div>
+      <div class="kpi-sub">${expensesInPeriod.length} payments out</div>
     </div>
     <div class="kpi-card">
-      <div class="kpi-label">One off</div>
-      <div class="kpi-value">${fmtKES(oneOff)}</div>
-      <div class="kpi-sub">${pct(oneOff, total)}% of total</div>
+      <div class="kpi-label">Net ${periodWord(p)}</div>
+      <div class="kpi-value ${net < 0 ? 'danger' : ''}">${fmtKES(net)}</div>
+      <div class="kpi-sub">${total > 0 ? pct(net, total) + '% margin' : '—'}</div>
     </div>
     <div class="kpi-card">
-      <div class="kpi-label">MRR (avg)</div>
-      <div class="kpi-value">${fmtKES(mrr)}</div>
-      <div class="kpi-sub">monthly + quarterly/3</div>
+      <div class="kpi-label">Net monthly</div>
+      <div class="kpi-value ${netMonthly < 0 ? 'danger' : ''}">${fmtKES(netMonthly)}</div>
+      <div class="kpi-sub">MRR ${fmtKES(mrr)} − burn ${fmtKES(burn)}</div>
     </div>
   `;
 
@@ -656,6 +990,8 @@ $('#revenuePeriod').addEventListener('click', (e) => {
 
 $('#addClientBtn').addEventListener('click', () => editClient(null));
 $('#addPaymentBtn').addEventListener('click', () => recordPayment(null));
+$('#addExpenseBtn').addEventListener('click', () => editExpense(null));
+$('#logExpensePaymentBtn').addEventListener('click', () => logExpensePayment(null));
 
 function clientFormHtml(c) {
   const isEdit = !!c;

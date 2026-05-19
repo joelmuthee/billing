@@ -9,6 +9,11 @@
 //   DELETE /api/clients/:id            → delete client (cascades payments)
 //   POST   /api/payments               → record payment, auto-bump client.next_due
 //   DELETE /api/payments/:id           → delete payment
+//   POST   /api/expenses               → create expense
+//   PUT    /api/expenses/:id           → update expense
+//   DELETE /api/expenses/:id           → delete expense (cascades payments)
+//   POST   /api/expense-payments       → record expense payment, auto-bump next_due
+//   DELETE /api/expense-payments/:id   → delete expense payment
 //
 // Auth: every endpoint except /api/health requires `Authorization: Bearer <ADMIN_TOKEN>`.
 // Set the token: npx wrangler secret put ADMIN_TOKEN
@@ -34,6 +39,7 @@ const isAuthed = (req, env) => {
 
 const PLANS = ["monthly", "quarterly", "one-off"];
 const STATUSES = ["active", "paused", "churned", "completed"];
+const EXPENSE_STATUSES = ["active", "paused", "cancelled", "completed"];
 const REMINDER_METHODS = ["whatsapp", "email", "kra_invoice", "none"];
 
 // Advance an ISO date (YYYY-MM-DD) by N months. Returns YYYY-MM-DD.
@@ -89,6 +95,25 @@ function validatePayment(p) {
   return null;
 }
 
+function validateExpense(e) {
+  if (!e || typeof e !== "object") return "body must be an object";
+  if (!e.name || typeof e.name !== "string") return "name is required";
+  if (!PLANS.includes(e.plan)) return `plan must be one of ${PLANS.join(", ")}`;
+  if (!e.start_date || !/^\d{4}-\d{2}-\d{2}$/.test(e.start_date)) return "start_date must be YYYY-MM-DD";
+  if (e.next_due && !/^\d{4}-\d{2}-\d{2}$/.test(e.next_due)) return "next_due must be YYYY-MM-DD";
+  if (e.amount != null && (typeof e.amount !== "number" || e.amount < 0)) return "amount must be a non-negative number";
+  if (e.status && !EXPENSE_STATUSES.includes(e.status)) return `status must be one of ${EXPENSE_STATUSES.join(", ")}`;
+  return null;
+}
+
+function validateExpensePayment(p) {
+  if (!p || typeof p !== "object") return "body must be an object";
+  if (!Number.isInteger(p.expense_id)) return "expense_id is required";
+  if (typeof p.amount !== "number" || p.amount <= 0) return "amount must be a positive number";
+  if (!p.paid_on || !/^\d{4}-\d{2}-\d{2}$/.test(p.paid_on)) return "paid_on must be YYYY-MM-DD";
+  return null;
+}
+
 export default {
   async fetch(request, env) {
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
@@ -112,7 +137,14 @@ export default {
     if (request.method === "GET" && path === "/api/data") {
       const clients = await env.DB.prepare("SELECT * FROM clients ORDER BY name COLLATE NOCASE").all();
       const payments = await env.DB.prepare("SELECT * FROM payments ORDER BY paid_on DESC, id DESC").all();
-      return json({ clients: clients.results || [], payments: payments.results || [] });
+      const expenses = await env.DB.prepare("SELECT * FROM expenses ORDER BY name COLLATE NOCASE").all();
+      const expensePayments = await env.DB.prepare("SELECT * FROM expense_payments ORDER BY paid_on DESC, id DESC").all();
+      return json({
+        clients: clients.results || [],
+        payments: payments.results || [],
+        expenses: expenses.results || [],
+        expense_payments: expensePayments.results || [],
+      });
     }
 
     if (request.method === "POST" && path === "/api/clients") {
@@ -224,6 +256,112 @@ export default {
     if (paymentMatch && request.method === "DELETE") {
       const id = Number(paymentMatch[1]);
       await env.DB.prepare("DELETE FROM payments WHERE id = ?").bind(id).run();
+      return json({ ok: true });
+    }
+
+    // ─────────── Expenses ───────────
+
+    if (request.method === "POST" && path === "/api/expenses") {
+      const body = await readBody(request);
+      const err = validateExpense(body);
+      if (err) return json({ error: err }, 400);
+      const next_due = body.next_due || (body.plan === "one-off" ? null : body.start_date);
+      const status = body.status || "active";
+      const result = await env.DB.prepare(
+        `INSERT INTO expenses (name, category, amount, method, plan, start_date, next_due, status, notes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+        .bind(
+          body.name.trim(),
+          body.category || null,
+          Math.round(body.amount || 0),
+          body.method || null,
+          body.plan,
+          body.start_date,
+          next_due,
+          status,
+          body.notes || null
+        )
+        .run();
+      const id = result.meta.last_row_id;
+      const created = await env.DB.prepare("SELECT * FROM expenses WHERE id = ?").bind(id).first();
+      return json({ expense: created }, 201);
+    }
+
+    const expenseMatch = path.match(/^\/api\/expenses\/(\d+)$/);
+    if (expenseMatch) {
+      const id = Number(expenseMatch[1]);
+      if (request.method === "PUT") {
+        const body = await readBody(request);
+        const err = validateExpense(body);
+        if (err) return json({ error: err }, 400);
+        await env.DB.prepare(
+          `UPDATE expenses
+           SET name = ?, category = ?, amount = ?, method = ?, plan = ?,
+               start_date = ?, next_due = ?, status = ?, notes = ?
+           WHERE id = ?`
+        )
+          .bind(
+            body.name.trim(),
+            body.category || null,
+            Math.round(body.amount || 0),
+            body.method || null,
+            body.plan,
+            body.start_date,
+            body.next_due || null,
+            body.status || "active",
+            body.notes || null,
+            id
+          )
+          .run();
+        const updated = await env.DB.prepare("SELECT * FROM expenses WHERE id = ?").bind(id).first();
+        if (!updated) return json({ error: "not found" }, 404);
+        return json({ expense: updated });
+      }
+      if (request.method === "DELETE") {
+        await env.DB.prepare("DELETE FROM expenses WHERE id = ?").bind(id).run();
+        return json({ ok: true });
+      }
+    }
+
+    if (request.method === "POST" && path === "/api/expense-payments") {
+      const body = await readBody(request);
+      const err = validateExpensePayment(body);
+      if (err) return json({ error: err }, 400);
+
+      const expense = await env.DB.prepare("SELECT * FROM expenses WHERE id = ?").bind(body.expense_id).first();
+      if (!expense) return json({ error: "expense not found" }, 404);
+
+      const insertResult = await env.DB.prepare(
+        `INSERT INTO expense_payments (expense_id, amount, paid_on, method, reference, notes)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      )
+        .bind(
+          body.expense_id,
+          Math.round(body.amount),
+          body.paid_on,
+          body.method || null,
+          body.reference || null,
+          body.notes || null
+        )
+        .run();
+      const paymentId = insertResult.meta.last_row_id;
+
+      const newNextDue = bumpNextDue(expense.plan, expense.next_due, body.paid_on);
+      const newStatus = expense.plan === "one-off" ? "completed" : expense.status;
+      await env.DB.prepare("UPDATE expenses SET next_due = ?, status = ? WHERE id = ?")
+        .bind(newNextDue, newStatus, body.expense_id)
+        .run();
+
+      const payment = await env.DB.prepare("SELECT * FROM expense_payments WHERE id = ?").bind(paymentId).first();
+      const updatedExpense = await env.DB.prepare("SELECT * FROM expenses WHERE id = ?").bind(body.expense_id).first();
+      return json({ payment, expense: updatedExpense }, 201);
+    }
+
+    const expensePaymentMatch = path.match(/^\/api\/expense-payments\/(\d+)$/);
+    if (expensePaymentMatch && request.method === "DELETE") {
+      const id = Number(expensePaymentMatch[1]);
+      await env.DB.prepare("DELETE FROM expense_payments WHERE id = ?").bind(id).run();
       return json({ ok: true });
     }
 

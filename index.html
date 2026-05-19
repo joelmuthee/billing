@@ -35,6 +35,7 @@
         <button class="tab active" data-tab="dashboard">Dashboard</button>
         <button class="tab" data-tab="clients">Clients</button>
         <button class="tab" data-tab="payments">Payments</button>
+        <button class="tab" data-tab="expenses">Expenses</button>
         <button class="tab" data-tab="revenue">Revenue</button>
       </nav>
       <button id="logout" class="btn-ghost">Log out</button>
@@ -84,6 +85,23 @@
           <button class="btn-primary" id="addPaymentBtn">+ Record payment</button>
         </div>
         <div class="card no-pad" id="paymentsList"></div>
+      </section>
+
+      <!-- Expenses -->
+      <section id="tab-expenses" class="tab-panel">
+        <div class="row-between">
+          <h2>Expenses</h2>
+          <div style="display:flex;gap:8px;">
+            <button class="btn-ghost" id="logExpensePaymentBtn">Log payment</button>
+            <button class="btn-primary" id="addExpenseBtn">+ Add expense</button>
+          </div>
+        </div>
+        <div class="kpi-row" id="expenseKpis"></div>
+        <div class="card no-pad" id="expensesList"></div>
+        <div class="card">
+          <div class="card-header"><h2>Recent expense payments</h2></div>
+          <div id="recentExpensePayments"></div>
+        </div>
       </section>
 
       <!-- Revenue -->
