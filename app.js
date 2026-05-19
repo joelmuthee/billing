@@ -192,6 +192,7 @@ document.addEventListener('keydown', (e) => {
 // ────────── Renderers ──────────
 
 function renderAll() {
+  renderBanner();
   renderKPIs();
   renderUpcoming();
   renderOverdue();
@@ -199,6 +200,48 @@ function renderAll() {
   renderClientsList();
   renderPaymentsList();
   if (state.activeTab === 'revenue') renderRevenue();
+}
+
+function renderBanner() {
+  const today = todayISO();
+  const in7 = new Date(parseISO(today).getTime() + 7 * 86400000).toISOString().slice(0, 10);
+  const overdue = state.clients.filter((c) => c.status === 'active' && c.next_due && c.next_due < today);
+  const dueWeek = state.clients.filter((c) => c.status === 'active' && c.next_due && c.next_due >= today && c.next_due <= in7);
+
+  const el = $('#banner');
+  if (overdue.length === 0 && dueWeek.length === 0) {
+    el.classList.add('hidden');
+    return;
+  }
+  const parts = [];
+  if (overdue.length) parts.push(`<strong>${overdue.length} overdue</strong>`);
+  if (dueWeek.length) parts.push(`${dueWeek.length} due this week`);
+  el.innerHTML = `<span>${parts.join(' · ')}</span><span class="banner-hint">↓ scroll for details</span>`;
+  el.classList.remove('hidden');
+  el.classList.toggle('danger', overdue.length > 0);
+}
+
+// WhatsApp click-to-send reminder (no auto messaging — opens WA with text prefilled)
+function waReminderUrl(c, kind) {
+  if (!c.phone) return null;
+  const digits = c.phone.replace(/\D/g, '');
+  if (!digits) return null;
+  const firstName = c.name.split(/\s+/)[0] || c.name;
+  const amount = fmtKES(c.amount);
+  const dateStr = fmtDate(c.next_due);
+  let msg;
+  if (kind === 'overdue') {
+    msg = `Hi ${firstName}, just a quick reminder that the ${amount} payment was due on ${dateStr} and is still pending. Could you settle it when you get a chance? Thanks.`;
+  } else {
+    msg = `Hi ${firstName}, friendly reminder that your ${amount} payment is due on ${dateStr}. Thanks.`;
+  }
+  return `https://wa.me/${digits}?text=${encodeURIComponent(msg)}`;
+}
+
+function waButton(c, kind) {
+  const url = waReminderUrl(c, kind);
+  if (!url) return '';
+  return `<a class="btn-sm wa" href="${url}" target="_blank" rel="noopener">Remind</a>`;
 }
 
 function renderKPIs() {
@@ -282,6 +325,7 @@ function renderUpcoming() {
       </div>
       <div class="actions">
         <div class="amount num">${fmtKES(c.amount)}</div>
+        ${waButton(c, 'upcoming')}
         <button class="btn-sm" onclick="quickPay(${c.id})">Mark paid</button>
       </div>
     </div>
@@ -310,6 +354,7 @@ function renderOverdue() {
       </div>
       <div class="actions">
         <div class="amount num">${fmtKES(c.amount)}</div>
+        ${waButton(c, 'overdue')}
         <button class="btn-sm" onclick="quickPay(${c.id})">Mark paid</button>
       </div>
     </div>

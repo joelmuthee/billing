@@ -88,6 +88,40 @@ Open the Pages URL, enter:
 
 Both are saved to localStorage so you sign in once per browser.
 
+## Daily email reminders (one-time setup)
+
+The worker runs a cron job at **5am UTC = 8am Nairobi** every day. If anything is overdue or due in the next 7 days, it emails you a digest. If nothing's pending, no email — quiet days stay quiet.
+
+To enable email sending you need a free **Resend** account because Cloudflare doesn't ship outbound email:
+
+1. Sign up at https://resend.com (free, 100 emails/day on the free tier — way more than enough)
+2. Add `essenceautomations.com` as a sending domain. Resend will give you 3 DNS records (SPF, DKIM, return-path) — copy them into Cloudflare DNS for the zone. Click "Verify". Takes ~2 minutes.
+3. Create an API key in Resend → API Keys → "Create API Key". Copy it.
+4. Set the secret on the worker:
+   ```powershell
+   cd "C:\Users\Joel\Website Designs\clients-dashboard\worker"
+   npx wrangler secret put RESEND_API_KEY
+   ```
+   Paste the key when prompted.
+5. Test it without waiting for tomorrow morning:
+   ```powershell
+   curl -X POST https://clients-dashboard-api.stawisystems.workers.dev/api/test-digest `
+     -H "Authorization: Bearer YOUR_PASSWORD"
+   ```
+   Check chat@essenceautomations.com for the email. If it doesn't arrive within a minute, the response body will tell you why (key not set, domain not verified, etc).
+
+If you skip this, the dashboard still works fine. The cron just no-ops because `RESEND_API_KEY` is unset.
+
+## WhatsApp reminders
+
+On every overdue and upcoming row, a small "Remind" button appears next to "Mark paid" (only when the client has a phone number saved). Click it → opens WhatsApp Web / app with a polite message pre-filled to that client. You hit send. No auto-messaging — manual on purpose, because a wrong message to a paying client is worse than missing a reminder.
+
+The message templates are in `app.js` → `waReminderUrl()`. Edit them if you want a different tone.
+
+## In-app banner
+
+When you open the dashboard, a yellow / red strip at the top of the Dashboard tab summarises "N overdue · M due this week" if anything needs attention. Disappears on quiet days.
+
 ## Day-to-day use
 
 - **Add a client**: Clients tab → "+ Add client". Plan + amount + start date are the only required fields. Next-due defaults to start date if blank.
