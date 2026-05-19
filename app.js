@@ -165,6 +165,20 @@ function addMonthsISO(iso, months) {
   return target.toISOString().slice(0, 10);
 }
 
+// Add N days to an ISO date, staying in local time. The naive
+// `new Date(localDate.getTime() + n*86400000).toISOString()` pattern silently
+// loses a day in any +UTC timezone (Nairobi is UTC+3) — local midnight goes
+// back to the previous day in UTC.
+function addDaysISO(iso, n) {
+  if (!iso) return null;
+  const [y, m, d] = iso.split('-').map(Number);
+  const target = new Date(y, m - 1, d + n);
+  const yy = target.getFullYear();
+  const mm = String(target.getMonth() + 1).padStart(2, '0');
+  const dd = String(target.getDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
+}
+
 // ────────── Auth ──────────
 
 function showLogin() {
@@ -263,7 +277,7 @@ function renderAll() {
 
 function renderBanner() {
   const today = todayISO();
-  const in7 = new Date(parseISO(today).getTime() + 7 * 86400000).toISOString().slice(0, 10);
+  const in7 = addDaysISO(today, 7);
   const overdue = upcomingItems().filter((it) => it.due < today);
   const dueWeek = upcomingItems().filter((it) => it.due >= today && it.due <= in7);
   const upsells = upsellDueClients();
@@ -402,8 +416,7 @@ function renderKPIs() {
     .filter((c) => c.next_due && c.next_due < today)
     .reduce((s, c) => s + c.amount, 0);
 
-  const in30 = new Date(parseISO(today).getTime() + 30 * 86400000)
-    .toISOString().slice(0, 10);
+  const in30 = addDaysISO(today, 30);
   const expected30 = activeClients
     .filter((c) => c.next_due && c.next_due >= today && c.next_due <= in30)
     .reduce((s, c) => s + c.amount, 0);
@@ -442,13 +455,13 @@ function countOverdue() {
 }
 function countDueSoon() {
   const today = todayISO();
-  const in30 = new Date(parseISO(today).getTime() + 30 * 86400000).toISOString().slice(0, 10);
+  const in30 = addDaysISO(today, 30);
   return state.clients.filter((c) => c.status === 'active' && c.next_due && c.next_due >= today && c.next_due <= in30).length;
 }
 
 function renderUpcoming() {
   const today = todayISO();
-  const in30 = new Date(parseISO(today).getTime() + 30 * 86400000).toISOString().slice(0, 10);
+  const in30 = addDaysISO(today, 30);
   const upcoming = upcomingItems().filter((it) => it.due >= today && it.due <= in30);
 
   const el = $('#upcomingList');
@@ -1424,12 +1437,17 @@ function renderBarChart() {
   const today = parseISO(todayISO());
   const todayMonth = todayISO().slice(0, 7);
 
-  // 12 months ending with the current month
+  // 12 months ending with the current month.
+  // Build the YYYY-MM key from local year/month (not toISOString) — in Nairobi
+  // UTC+3, toISOString() of a local-midnight Date lands in the previous day's
+  // UTC, shifting the month key one back. That bug made every bar label one
+  // month ahead of the data it was showing.
   const months = [];
   for (let i = 11; i >= 0; i--) {
     const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
-    const key = d.toISOString().slice(0, 7);
-    months.push({ key, label: d.toLocaleDateString('en-GB', { month: 'short' }), total: 0 });
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    months.push({ key: `${y}-${m}`, label: d.toLocaleDateString('en-GB', { month: 'short' }), total: 0 });
   }
   for (const m of months) {
     m.total = accrualRevenueForMonth(m.key);
