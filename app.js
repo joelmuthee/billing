@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260519-16';
+const APP_VERSION = '20260519-17';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
 
 // Service catalogue, sourced from essenceautomations.com
@@ -501,18 +501,21 @@ function renderUpcoming() {
 }
 
 function invoiceBadge(it) {
+  const isKra = it.client.reminder_method === 'kra_invoice';
+  const label = isKra ? 'KRA invoice' : 'Invoice';
   if (it.invoiceSent) {
-    return `<span class="badge ok">✓ Invoiced</span>`;
+    return `<span class="badge ok">✓ ${label} raised</span>`;
   }
-  return `<span class="badge danger">Invoice needed</span>`;
+  return `<span class="badge danger">${label} needed</span>`;
 }
 
 function invoiceToggleButton(it) {
+  const isKra = it.client.reminder_method === 'kra_invoice';
   const idArg = it.kind === 'scheduled' ? it.scheduled.id : it.client.id;
   if (it.invoiceSent) {
-    return `<button class="btn-sm" onclick="toggleInvoice('${it.kind}', ${idArg}, true)" title="Unmark invoice">↩ Invoice</button>`;
+    return `<button class="btn-sm" onclick="toggleInvoice('${it.kind}', ${idArg}, true)" title="Unmark invoice">↩ ${isKra ? 'KRA invoice' : 'Invoice'}</button>`;
   }
-  return `<button class="btn-sm invoice-cta" onclick="toggleInvoice('${it.kind}', ${idArg}, false)">+ Mark invoiced</button>`;
+  return `<button class="btn-sm invoice-cta" onclick="toggleInvoice('${it.kind}', ${idArg}, false)">+ ${isKra ? 'Mark KRA raised' : 'Mark invoiced'}</button>`;
 }
 
 function upcomingRowHtml(it, kind) {
