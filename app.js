@@ -438,9 +438,9 @@ function renderKPIs() {
       <div class="kpi-sub">${countDueSoon()} clients due</div>
     </div>
     <div class="kpi-card">
-      <div class="kpi-label">Active clients</div>
-      <div class="kpi-value">${activeClients.length}</div>
-      <div class="kpi-sub">${activeClients.filter((c) => c.plan === 'monthly' || c.plan === 'quarterly').length} recurring · ${activeClients.filter((c) => c.plan === 'one-off').length} one off</div>
+      <div class="kpi-label">Clients</div>
+      <div class="kpi-value">${state.clients.filter((c) => c.status !== 'churned').length}</div>
+      <div class="kpi-sub">${state.clients.filter((c) => (c.plan === 'monthly' || c.plan === 'quarterly') && c.status === 'active').length} recurring · ${state.clients.filter((c) => c.plan === 'one-off' && c.status !== 'churned').length} one off</div>
     </div>
   `;
 }
