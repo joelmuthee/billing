@@ -1365,15 +1365,17 @@ function renderRevenue() {
   const netMonthly = mrr - burn;
 
   $('#revenueSummary').innerHTML = `
-    <div class="kpi-card">
+    <div class="kpi-card clickable" onclick="showRevenueBreakdown()">
       <div class="kpi-label">Revenue ${periodWord(p)}</div>
       <div class="kpi-value">${fmtKES(total)}</div>
       <div class="kpi-sub">expected (quarterly /3)</div>
+      <div class="breakdown-link">See breakdown →</div>
     </div>
-    <div class="kpi-card">
+    <div class="kpi-card clickable" onclick="showExpenseBreakdown()">
       <div class="kpi-label">Expenses ${periodWord(p)}</div>
       <div class="kpi-value">${fmtKES(totalExpenses)}</div>
       <div class="kpi-sub">expected</div>
+      <div class="breakdown-link">See breakdown →</div>
     </div>
     <div class="kpi-card">
       <div class="kpi-label">Net ${periodWord(p)}</div>
@@ -1460,6 +1462,140 @@ function renderTopClients(startIso, endIso) {
     </div>
   `).join('');
 }
+
+// ────────── Breakdowns ──────────
+
+function buildRevenueBreakdownData(startIso, endIso) {
+  const months = monthsInPeriod(startIso, endIso);
+  const recurring = state.clients
+    .filter((c) => c.plan !== 'one-off')
+    .map((c) => {
+      let monthsActive = 0;
+      for (const m of months) if (entityActiveInMonth(c, m)) monthsActive++;
+      const perMonth = clientMonthlyContribution(c);
+      return { name: c.name, plan: c.plan, amount: c.amount, perMonth, monthsActive, total: perMonth * monthsActive };
+    })
+    .filter((r) => r.total > 0)
+    .sort((a, b) => b.total - a.total);
+
+  const oneOff = state.payments
+    .filter((p) => p.paid_on >= startIso && p.paid_on <= endIso)
+    .map((p) => ({ payment: p, client: state.clients.find((c) => c.id === p.client_id) }))
+    .filter((x) => x.client && x.client.plan === 'one-off')
+    .map((x) => ({ name: x.client.name, paid_on: x.payment.paid_on, amount: x.payment.amount }))
+    .sort((a, b) => b.paid_on.localeCompare(a.paid_on));
+
+  return {
+    recurring,
+    oneOff,
+    recurringTotal: recurring.reduce((s, r) => s + r.total, 0),
+    oneOffTotal: oneOff.reduce((s, r) => s + r.amount, 0),
+    monthCount: months.length,
+  };
+}
+
+function buildExpenseBreakdownData(startIso, endIso) {
+  const months = monthsInPeriod(startIso, endIso);
+  const recurring = state.expenses
+    .filter((e) => e.plan !== 'one-off')
+    .map((e) => {
+      let monthsActive = 0;
+      for (const m of months) if (entityActiveInMonth(e, m)) monthsActive++;
+      const perMonth = expenseMonthlyContribution(e);
+      return { name: e.name, plan: e.plan, amount: e.amount, perMonth, monthsActive, total: perMonth * monthsActive };
+    })
+    .filter((r) => r.total > 0)
+    .sort((a, b) => b.total - a.total);
+
+  const oneOff = state.expense_payments
+    .filter((p) => p.paid_on >= startIso && p.paid_on <= endIso)
+    .map((p) => ({ payment: p, expense: state.expenses.find((e) => e.id === p.expense_id) }))
+    .filter((x) => x.expense && x.expense.plan === 'one-off')
+    .map((x) => ({ name: x.expense.name, paid_on: x.payment.paid_on, amount: x.payment.amount }))
+    .sort((a, b) => b.paid_on.localeCompare(a.paid_on));
+
+  return {
+    recurring,
+    oneOff,
+    recurringTotal: recurring.reduce((s, r) => s + r.total, 0),
+    oneOffTotal: oneOff.reduce((s, r) => s + r.amount, 0),
+    monthCount: months.length,
+  };
+}
+
+function breakdownTableHtml(title, recurring, oneOff, recurringTotal, oneOffTotal, monthCount) {
+  const showMonthsCol = monthCount > 1;
+  const recurringSection = recurring.length ? `
+    <div class="breakdown-section">
+      <div class="breakdown-section-title">Recurring (smoothed)</div>
+      <table class="breakdown-table">
+        <tbody>
+          ${recurring.map((r) => `
+            <tr>
+              <td>${escapeHtml(r.name)}</td>
+              <td class="muted-2">${planLabel(r.plan)}${r.plan === 'quarterly' ? ` <span class="hint">${fmtKES(r.amount)}/3</span>` : ''}</td>
+              <td class="num">${fmtKES(r.perMonth)}<span class="hint">/mo</span></td>
+              ${showMonthsCol ? `<td class="num muted-2">× ${r.monthsActive}</td>` : ''}
+              <td class="num strong">${fmtKES(r.total)}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+      <div class="breakdown-subtotal">Subtotal · <span class="num">${fmtKES(recurringTotal)}</span></div>
+    </div>
+  ` : '';
+
+  const oneOffSection = oneOff.length ? `
+    <div class="breakdown-section">
+      <div class="breakdown-section-title">One-off (actuals)</div>
+      <table class="breakdown-table">
+        <tbody>
+          ${oneOff.map((p) => `
+            <tr>
+              <td>${escapeHtml(p.name)}</td>
+              <td class="muted-2 mono">${fmtDate(p.paid_on)}</td>
+              <td class="num strong">${fmtKES(p.amount)}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+      <div class="breakdown-subtotal">Subtotal · <span class="num">${fmtKES(oneOffTotal)}</span></div>
+    </div>
+  ` : '';
+
+  const total = recurringTotal + oneOffTotal;
+  const emptyState = recurring.length === 0 && oneOff.length === 0
+    ? `<p class="muted" style="text-align:center; padding:20px 0;">Nothing recorded in this period.</p>` : '';
+
+  return `
+    <h2>${title}</h2>
+    <p class="muted breakdown-note">Recurring contributions are smoothed (quarterly ÷ 3) across active months. One-offs count as actual cash on the date paid.</p>
+    ${emptyState}
+    ${recurringSection}
+    ${oneOffSection}
+    ${(recurring.length || oneOff.length) ? `
+      <div class="breakdown-total">
+        <span>Total</span>
+        <span class="num">${fmtKES(total)}</span>
+      </div>
+    ` : ''}
+    <div class="modal-actions">
+      <button type="button" class="btn-primary" onclick="closeModal()">Close</button>
+    </div>
+  `;
+}
+
+window.showRevenueBreakdown = function () {
+  const { start, end } = periodRange(state.revenuePeriod);
+  const d = buildRevenueBreakdownData(start, end);
+  openModal(breakdownTableHtml(`Revenue ${periodWord(state.revenuePeriod)}`, d.recurring, d.oneOff, d.recurringTotal, d.oneOffTotal, d.monthCount));
+};
+
+window.showExpenseBreakdown = function () {
+  const { start, end } = periodRange(state.revenuePeriod);
+  const d = buildExpenseBreakdownData(start, end);
+  openModal(breakdownTableHtml(`Expenses ${periodWord(state.revenuePeriod)}`, d.recurring, d.oneOff, d.recurringTotal, d.oneOffTotal, d.monthCount));
+};
 
 // Segmented period control
 $('#revenuePeriod').addEventListener('click', (e) => {
