@@ -1412,39 +1412,64 @@ function pct(part, total) {
 }
 
 function renderBarChart() {
-  const months = [];
   const today = parseISO(todayISO());
-  for (let i = 11; i >= 0; i--) {
-    const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
-    const key = d.toISOString().slice(0, 7);
-    months.push({ key, label: d.toLocaleDateString('en-GB', { month: 'short' }), total: 0 });
+  const reportingMonth = REPORTING_STARTED.slice(0, 7);
+  const todayMonth = todayISO().slice(0, 7);
+
+  // Count real months (from REPORTING_STARTED up to current month)
+  const realMonthsCount = monthsInPeriod(REPORTING_STARTED, todayISO()).length;
+
+  // Need at least 3 real months to make a chart worth showing
+  if (realMonthsCount < 3) {
+    const monthsRemaining = 3 - realMonthsCount;
+    $('#revenueChart').innerHTML = `
+      <div class="chart-empty">
+        <div class="chart-empty-icon">📈</div>
+        <div class="chart-empty-title">Trend chart unlocks after 3 months</div>
+        <div class="chart-empty-body">
+          Day-by-day tracking started ${fmtDate(REPORTING_STARTED)}.
+          You're on month ${realMonthsCount} of 3.
+          ${monthsRemaining === 1
+            ? `Come back next month for your first real trend chart.`
+            : `${monthsRemaining} more month${monthsRemaining > 1 ? 's' : ''} of payments needed before this becomes meaningful.`}
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  // 3+ real months: show only real months, no faded projections
+  const months = [];
+  const startCursor = realMonthsCount >= 12
+    ? new Date(today.getFullYear(), today.getMonth() - 11, 1)
+    : (() => { const [y, m] = reportingMonth.split('-').map(Number); return new Date(y, m - 1, 1); })();
+  let cursor = new Date(startCursor);
+  while (cursor.toISOString().slice(0, 7) <= todayMonth) {
+    const key = cursor.toISOString().slice(0, 7);
+    months.push({ key, label: cursor.toLocaleDateString('en-GB', { month: 'short' }), total: 0 });
+    cursor.setMonth(cursor.getMonth() + 1);
   }
   for (const m of months) {
     m.total = accrualRevenueForMonth(m.key);
   }
   const max = Math.max(...months.map((m) => m.total), 1);
 
-  const reportingMonth = REPORTING_STARTED.slice(0, 7);
-  const hasPreReporting = months.some((m) => m.key < reportingMonth);
-
   $('#revenueChart').innerHTML = `
     <div class="bar-chart">
       ${months.map((m) => {
         const pct = (m.total / max) * 100;
-        const isProjected = m.key < reportingMonth;
+        const isCurrent = m.key === todayMonth;
         return `
-          <div class="bar-col${isProjected ? ' projected' : ''}">
+          <div class="bar-col${isCurrent ? ' current' : ''}">
             <div class="bar-value">${m.total > 0 ? shortNum(m.total) : ''}</div>
             ${m.total > 0
-              ? `<div class="bar" style="height: ${pct}%; min-height: 4px;" title="${m.label}: ${fmtKES(m.total)}${isProjected ? ' (projected, pre-tracking)' : ''}"></div>`
+              ? `<div class="bar" style="height: ${pct}%; min-height: 4px;" title="${m.label}: ${fmtKES(m.total)}"></div>`
               : `<div class="bar-spacer"></div>`}
             <div class="bar-label">${m.label}</div>
           </div>
         `;
       }).join('')}
-    </div>
-    ${hasPreReporting ? `<p class="chart-footnote">Lighter bars before ${fmtDate(REPORTING_STARTED)} are projected from current client setup. Day-by-day tracking started that date.</p>` : ''}
-  `;
+    </div>`;
 }
 
 function shortNum(n) {
