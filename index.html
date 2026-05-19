@@ -46,6 +46,13 @@
       <!-- Dashboard -->
       <section id="tab-dashboard" class="tab-panel active">
         <div id="banner" class="banner hidden"></div>
+        <div class="row-between">
+          <h2>Today</h2>
+          <div class="action-row">
+            <button class="btn-ghost" id="dashRecordPaymentBtn">+ Record payment</button>
+            <button class="btn-primary" id="dashAddClientBtn">+ Add client</button>
+          </div>
+        </div>
         <div class="kpi-row" id="kpiRow"></div>
         <div class="two-col">
           <div class="card">
@@ -80,6 +87,11 @@
         <div class="row-between">
           <h2>All clients</h2>
           <button class="btn-primary" id="addClientBtn">+ Add client</button>
+        </div>
+        <div class="filter-pills" id="clientFilter">
+          <button class="filter-pill active" data-filter="all">All</button>
+          <button class="filter-pill" data-filter="recurring">Recurring</button>
+          <button class="filter-pill" data-filter="one-off">One off</button>
         </div>
         <div class="card no-pad" id="clientsList"></div>
       </section>

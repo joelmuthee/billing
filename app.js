@@ -46,6 +46,7 @@ const state = {
   scheduled_payments: [],
   activeTab: 'dashboard',
   revenuePeriod: '30d',
+  clientFilter: 'all',
 };
 
 // ────────── Formatting helpers ──────────
@@ -416,7 +417,7 @@ function renderKPIs() {
     <div class="kpi-card">
       <div class="kpi-label">Active clients</div>
       <div class="kpi-value">${activeClients.length}</div>
-      <div class="kpi-sub">${state.clients.length} total</div>
+      <div class="kpi-sub">${activeClients.filter((c) => c.plan === 'monthly' || c.plan === 'quarterly').length} recurring · ${activeClients.filter((c) => c.plan === 'one-off').length} one off</div>
     </div>
   `;
 }
@@ -606,7 +607,16 @@ function renderClientsList() {
     el.innerHTML = '<div class="empty">No clients yet. Add your first one.</div>';
     return;
   }
-  const sorted = [...state.clients].sort((a, b) => {
+  const filtered = state.clients.filter((c) => {
+    if (state.clientFilter === 'recurring') return c.plan === 'monthly' || c.plan === 'quarterly';
+    if (state.clientFilter === 'one-off') return c.plan === 'one-off';
+    return true;
+  });
+  if (filtered.length === 0) {
+    el.innerHTML = `<div class="empty">No ${state.clientFilter === 'recurring' ? 'recurring' : 'one-off'} clients yet.</div>`;
+    return;
+  }
+  const sorted = [...filtered].sort((a, b) => {
     const sa = a.status === 'active' ? 0 : 1;
     const sb = b.status === 'active' ? 0 : 1;
     if (sa !== sb) return sa - sb;
@@ -1406,6 +1416,16 @@ $('#addPaymentBtn').addEventListener('click', () => recordPayment(null));
 $('#addExpenseBtn').addEventListener('click', () => editExpense(null));
 $('#logExpensePaymentBtn').addEventListener('click', () => logExpensePayment(null));
 $('#quickExpenseBtn').addEventListener('click', () => recordQuickExpense());
+$('#dashAddClientBtn').addEventListener('click', () => editClient(null));
+$('#dashRecordPaymentBtn').addEventListener('click', () => recordPayment(null));
+
+$('#clientFilter').addEventListener('click', (e) => {
+  const btn = e.target.closest('button');
+  if (!btn) return;
+  state.clientFilter = btn.dataset.filter;
+  $$('#clientFilter .filter-pill').forEach((b) => b.classList.toggle('active', b === btn));
+  renderClientsList();
+});
 
 function servicesFieldHtml(selected) {
   const sel = new Set(selected || []);

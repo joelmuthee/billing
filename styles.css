@@ -205,6 +205,30 @@ textarea { resize: vertical; min-height: 72px; }
   flex-wrap: wrap;
 }
 
+/* Filter pills */
+.filter-pills {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.filter-pill {
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+  background: #fff;
+  border-radius: 9999px;
+  box-shadow: var(--shadow-light);
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+}
+.filter-pill:hover { color: var(--text); }
+.filter-pill.active {
+  background: var(--text);
+  color: #fff;
+  box-shadow: none;
+}
+
 /* Card */
 .card {
   background: #fff;
