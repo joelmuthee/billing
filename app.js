@@ -818,6 +818,106 @@ window.logExpensePayment = function (expenseId) {
   });
 };
 
+// Ad-hoc / one-off expense: creates the expense AND its payment in one go.
+window.recordQuickExpense = function () {
+  openModal(`
+    <h2>Record expense</h2>
+    <p class="muted" style="margin-bottom:14px;">For one-off costs that just came up. For recurring bills like GHL, use "+ Add recurring" instead.</p>
+    <form id="quickExpenseForm">
+      <label>
+        <span>What was it?</span>
+        <input type="text" name="name" required placeholder="Printer toner, taxi, lunch with client…" autofocus>
+      </label>
+      <div class="form-row">
+        <label>
+          <span>Amount (Ksh)</span>
+          <input type="number" name="amount" min="1" step="1" required>
+        </label>
+        <label>
+          <span>Paid on</span>
+          <input type="date" name="paid_on" required value="${todayISO()}">
+        </label>
+      </div>
+      <div class="form-row">
+        <label>
+          <span>Category <span class="hint">(optional)</span></span>
+          <input type="text" name="category" placeholder="supplies, transport, food…">
+        </label>
+        <label>
+          <span>Method</span>
+          <select name="method">
+            <option value="">—</option>
+            <option value="mpesa">Mpesa</option>
+            <option value="card">Card</option>
+            <option value="bank">Bank</option>
+            <option value="cash">Cash</option>
+            <option value="cheque">Cheque</option>
+          </select>
+        </label>
+      </div>
+      <label>
+        <span>Reference <span class="hint">(receipt, txn id — optional)</span></span>
+        <input type="text" name="reference">
+      </label>
+      <label>
+        <span>Notes <span class="hint">(optional)</span></span>
+        <textarea name="notes"></textarea>
+      </label>
+      <p class="error hidden" id="quickExpenseErr"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn-ghost" onclick="closeModal()">Cancel</button>
+        <button type="submit" class="btn-primary">Record</button>
+      </div>
+    </form>
+  `);
+  $('#quickExpenseForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const fd = new FormData(ev.target);
+    const name = fd.get('name').trim();
+    const amount = Number(fd.get('amount')) || 0;
+    const paid_on = fd.get('paid_on');
+    const method = fd.get('method') || null;
+    const category = (fd.get('category') || '').trim() || null;
+    const reference = (fd.get('reference') || '').trim() || null;
+    const notes = (fd.get('notes') || '').trim() || null;
+    try {
+      const expenseRes = await api('/api/expenses', {
+        method: 'POST',
+        body: JSON.stringify({
+          name,
+          category,
+          amount,
+          plan: 'one-off',
+          method,
+          start_date: paid_on,
+          next_due: null,
+          notes,
+          status: 'active',
+        }),
+      });
+      const expenseId = expenseRes.expense.id;
+      await api('/api/expense-payments', {
+        method: 'POST',
+        body: JSON.stringify({
+          expense_id: expenseId,
+          amount,
+          paid_on,
+          method,
+          reference,
+          notes,
+        }),
+      });
+      await loadData();
+      closeModal();
+      toast('Expense recorded');
+    } catch (err) {
+      const errEl = $('#quickExpenseErr');
+      errEl.textContent = err.message;
+      errEl.classList.remove('hidden');
+    }
+  });
+};
+
 window.deleteExpensePayment = async function (id) {
   if (!confirm('Delete this expense payment record? Does not reverse the next-due bump.')) return;
   try {
@@ -992,6 +1092,7 @@ $('#addClientBtn').addEventListener('click', () => editClient(null));
 $('#addPaymentBtn').addEventListener('click', () => recordPayment(null));
 $('#addExpenseBtn').addEventListener('click', () => editExpense(null));
 $('#logExpensePaymentBtn').addEventListener('click', () => logExpensePayment(null));
+$('#quickExpenseBtn').addEventListener('click', () => recordQuickExpense());
 
 function clientFormHtml(c) {
   const isEdit = !!c;

@@ -199,6 +199,12 @@ textarea { resize: vertical; min-height: 72px; }
   gap: 12px;
 }
 
+.action-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 /* Card */
 .card {
   background: #fff;
