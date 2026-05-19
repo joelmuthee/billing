@@ -1170,21 +1170,33 @@ window.deleteExpensePayment = async function (id) {
 // ────────── Revenue tab ──────────
 
 // Period boundaries snap to calendar-month starts so accrual math is clean.
-function periodStart(period) {
+// Returns { start, end } so "Last month" can cut off before today.
+function periodRange(period) {
   const today = parseISO(todayISO());
-  const ymToISO = (y, m) => `${y}-${String(m + 1).padStart(2, '0')}-01`;
-  if (period === '30d') return ymToISO(today.getFullYear(), today.getMonth());
+  const ymStart = (y, m) => `${y}-${String(m + 1).padStart(2, '0')}-01`;
+  const ymEnd = (y, m) => new Date(Date.UTC(y, m + 1, 0)).toISOString().slice(0, 10);
+  if (period === '30d') {
+    return { start: ymStart(today.getFullYear(), today.getMonth()), end: todayISO() };
+  }
+  if (period === 'lastmo') {
+    const d = new Date(today);
+    d.setMonth(d.getMonth() - 1);
+    return {
+      start: ymStart(d.getFullYear(), d.getMonth()),
+      end: ymEnd(d.getFullYear(), d.getMonth()),
+    };
+  }
   if (period === '6mo') {
     const d = new Date(today);
     d.setMonth(d.getMonth() - 5);
-    return ymToISO(d.getFullYear(), d.getMonth());
+    return { start: ymStart(d.getFullYear(), d.getMonth()), end: todayISO() };
   }
   if (period === '1yr') {
     const d = new Date(today);
     d.setMonth(d.getMonth() - 11);
-    return ymToISO(d.getFullYear(), d.getMonth());
+    return { start: ymStart(d.getFullYear(), d.getMonth()), end: todayISO() };
   }
-  return '0000-01-01';
+  return { start: '0000-01-01', end: todayISO() };
 }
 
 // ────────── Accrual helpers ──────────
@@ -1268,22 +1280,22 @@ function accrualExpenseForMonth(monthIso) {
   return total;
 }
 
-function accrualRevenueForPeriod(startIso) {
-  return monthsInPeriod(startIso, todayISO()).reduce((s, m) => s + accrualRevenueForMonth(m), 0);
+function accrualRevenueForPeriod(startIso, endIso = todayISO()) {
+  return monthsInPeriod(startIso, endIso).reduce((s, m) => s + accrualRevenueForMonth(m), 0);
 }
-function accrualExpenseForPeriod(startIso) {
-  return monthsInPeriod(startIso, todayISO()).reduce((s, m) => s + accrualExpenseForMonth(m), 0);
+function accrualExpenseForPeriod(startIso, endIso = todayISO()) {
+  return monthsInPeriod(startIso, endIso).reduce((s, m) => s + accrualExpenseForMonth(m), 0);
 }
 
-function clientPeriodAccrual(c, startIso) {
+function clientPeriodAccrual(c, startIso, endIso = todayISO()) {
   let total = 0;
   if (c.plan !== 'one-off') {
-    for (const m of monthsInPeriod(startIso, todayISO())) {
+    for (const m of monthsInPeriod(startIso, endIso)) {
       if (entityActiveInMonth(c, m)) total += clientMonthlyContribution(c);
     }
   } else {
     state.payments
-      .filter((p) => p.client_id === c.id && p.paid_on >= startIso)
+      .filter((p) => p.client_id === c.id && p.paid_on >= startIso && p.paid_on <= endIso)
       .forEach((p) => { total += p.amount; });
   }
   return total;
@@ -1291,9 +1303,9 @@ function clientPeriodAccrual(c, startIso) {
 
 function renderRevenue() {
   const p = state.revenuePeriod;
-  const start = periodStart(p);
-  const total = accrualRevenueForPeriod(start);
-  const totalExpenses = accrualExpenseForPeriod(start);
+  const { start, end } = periodRange(p);
+  const total = accrualRevenueForPeriod(start, end);
+  const totalExpenses = accrualExpenseForPeriod(start, end);
   const net = total - totalExpenses;
 
   const mrr = state.clients
@@ -1328,11 +1340,12 @@ function renderRevenue() {
   `;
 
   renderBarChart();
-  renderTopClients(start);
+  renderTopClients(start, end);
 }
 
 function periodWord(p) {
   if (p === '30d') return '(this month)';
+  if (p === 'lastmo') return '(last month)';
   if (p === '6mo') return '(6 months)';
   if (p === '1yr') return '(12 months)';
   return '(all time)';
@@ -1380,9 +1393,9 @@ function shortNum(n) {
   return String(n);
 }
 
-function renderTopClients(startIso) {
+function renderTopClients(startIso, endIso) {
   const rows = state.clients
-    .map((c) => ({ name: c.name, total: clientPeriodAccrual(c, startIso) }))
+    .map((c) => ({ name: c.name, total: clientPeriodAccrual(c, startIso, endIso) }))
     .filter((r) => r.total > 0)
     .sort((a, b) => b.total - a.total)
     .slice(0, 10);
