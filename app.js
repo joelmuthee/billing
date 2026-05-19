@@ -713,10 +713,14 @@ window.addScheduled = function (clientId) {
       notes: (fd.get('notes') || '').trim() || null,
     };
     try {
-      await api('/api/scheduled-payments', { method: 'POST', body: JSON.stringify(body) });
+      const result = await api('/api/scheduled-payments', { method: 'POST', body: JSON.stringify(body) });
       await loadData();
       closeModal();
-      toast('Payment scheduled');
+      if (result && result.reactivated) {
+        toast(`${c.name} reactivated, balance due ${fmtDate(body.due_date)}`);
+      } else {
+        toast('Payment scheduled');
+      }
     } catch (err) {
       const errEl = $('#scheduledErr');
       errEl.textContent = err.message;

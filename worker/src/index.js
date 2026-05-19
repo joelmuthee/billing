@@ -348,8 +348,23 @@ export default {
         )
         .run();
       const id = result.meta.last_row_id;
+
+      // If this scheduled payment is being added to a completed one-off
+      // client, reactivate them, since "more money expected" contradicts
+      // "completed". Catches the case where a user records the first
+      // payment of an installment project before adding the balance schedule.
+      const client = await env.DB.prepare("SELECT * FROM clients WHERE id = ?").bind(body.client_id).first();
+      let reactivated = false;
+      if (client && client.plan === "one-off" && client.status === "completed") {
+        await env.DB.prepare("UPDATE clients SET status = 'active' WHERE id = ?").bind(body.client_id).run();
+        reactivated = true;
+      }
+
       const created = await env.DB.prepare("SELECT * FROM scheduled_payments WHERE id = ?").bind(id).first();
-      return json({ scheduled_payment: created }, 201);
+      const updatedClient = reactivated
+        ? await env.DB.prepare("SELECT * FROM clients WHERE id = ?").bind(body.client_id).first()
+        : client;
+      return json({ scheduled_payment: created, client: updatedClient, reactivated }, 201);
     }
 
     const scheduledMatch = path.match(/^\/api\/scheduled-payments\/(\d+)$/);
