@@ -175,10 +175,10 @@ CORS is `Access-Control-Allow-Origin: *`. The bearer token is the only real boun
 Single page, 5 tabs:
 
 1. **Dashboard** — Cash view. KPI row (this-month / outstanding / next-30d / active count split recurring vs one-off), upcoming (clients + scheduled merged) + overdue, upsell follow-ups due, recent payments. Quick-action buttons up top: "+ Record payment", "+ Add client".
-2. **Clients** — All clients with filter pills (All / Recurring / One off with counts). Per-row actions: Pay / Schedule / Edit / Delete. Delete uses type-to-confirm.
+2. **Clients** — Growth KPI row (Added this month / Last 3 months / Last 12 months / All time, each click-drillable to the client list for that window). Filter pills (All / Recurring / One off with counts). Per-row actions: Pay / Schedule / Edit / Delete. Delete uses type-to-confirm.
 3. **Payments** — Inbound payment log.
 4. **Expenses** — Recurring expenses list + recent expense payments + 3 buttons: Log payment (for recurring), + Add recurring, + Record expense (one-off shortcut that creates expense + payment in one submit).
-5. **Revenue** — Accrual view. Period selector (This month / Last month / 6 months / 12 months / All time) drives 4 KPIs (Revenue / Expenses / Net / Net monthly), a 12-month bar chart, and a top-clients-in-period list.
+5. **Revenue** — Accrual view. Period selector (This month / Last month / 6 months / 12 months / All time) drives 4 KPIs (Revenue / Expenses / Net / Net monthly), a 12-month bar chart with **clickable bars** (each opens that month's revenue breakdown modal), and a top-clients-in-period list whose title shows the active period (e.g. "Top clients (May 2026)").
 
 ## Key design decisions
 
