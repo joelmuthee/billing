@@ -6,11 +6,6 @@ const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
 
-// Dashboard was built and seeded in May 2026. Anything before this date is
-// projected from current client config and may not reflect historical reality
-// (since old clients/expenses weren't tracked day by day).
-const REPORTING_STARTED = '2026-05-01';
-
 // Service catalogue, sourced from essenceautomations.com
 const SERVICES_CATEGORIES = [
   { name: 'Get Found', items: [
@@ -1417,41 +1412,14 @@ function pct(part, total) {
 
 function renderBarChart() {
   const today = parseISO(todayISO());
-  const reportingMonth = REPORTING_STARTED.slice(0, 7);
   const todayMonth = todayISO().slice(0, 7);
 
-  // Count real months (from REPORTING_STARTED up to current month)
-  const realMonthsCount = monthsInPeriod(REPORTING_STARTED, todayISO()).length;
-
-  // Need at least 3 real months to make a chart worth showing
-  if (realMonthsCount < 3) {
-    const monthsRemaining = 3 - realMonthsCount;
-    $('#revenueChart').innerHTML = `
-      <div class="chart-empty">
-        <div class="chart-empty-icon">📈</div>
-        <div class="chart-empty-title">Trend chart unlocks after 3 months</div>
-        <div class="chart-empty-body">
-          Day-by-day tracking started ${fmtDate(REPORTING_STARTED)}.
-          You're on month ${realMonthsCount} of 3.
-          ${monthsRemaining === 1
-            ? `Come back next month for your first real trend chart.`
-            : `${monthsRemaining} more month${monthsRemaining > 1 ? 's' : ''} of payments needed before this becomes meaningful.`}
-        </div>
-      </div>
-    `;
-    return;
-  }
-
-  // 3+ real months: show only real months, no faded projections
+  // 12 months ending with the current month
   const months = [];
-  const startCursor = realMonthsCount >= 12
-    ? new Date(today.getFullYear(), today.getMonth() - 11, 1)
-    : (() => { const [y, m] = reportingMonth.split('-').map(Number); return new Date(y, m - 1, 1); })();
-  let cursor = new Date(startCursor);
-  while (cursor.toISOString().slice(0, 7) <= todayMonth) {
-    const key = cursor.toISOString().slice(0, 7);
-    months.push({ key, label: cursor.toLocaleDateString('en-GB', { month: 'short' }), total: 0 });
-    cursor.setMonth(cursor.getMonth() + 1);
+  for (let i = 11; i >= 0; i--) {
+    const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
+    const key = d.toISOString().slice(0, 7);
+    months.push({ key, label: d.toLocaleDateString('en-GB', { month: 'short' }), total: 0 });
   }
   for (const m of months) {
     m.total = accrualRevenueForMonth(m.key);
@@ -1600,12 +1568,8 @@ function paymentStatusLabel(r) {
   return `<span class="status-expected">Expected</span>`;
 }
 
-function breakdownTableHtml(title, recurring, oneOff, recurringTotal, oneOffTotal, monthCount, startIso) {
+function breakdownTableHtml(title, recurring, oneOff, recurringTotal, oneOffTotal, monthCount) {
   const showMonthsCol = monthCount > 1;
-  const crossesCutoff = startIso && startIso < REPORTING_STARTED;
-  const cutoffNote = crossesCutoff
-    ? `<div class="breakdown-cutoff">⚠ Accurate tracking started ${fmtDate(REPORTING_STARTED)}. Numbers before that date are projected from current client setup and may not match what actually happened.</div>`
-    : '';
   const recurringSection = recurring.length ? `
     <div class="breakdown-section">
       <div class="breakdown-section-title">Recurring (smoothed)</div>
@@ -1654,7 +1618,6 @@ function breakdownTableHtml(title, recurring, oneOff, recurringTotal, oneOffTota
   return `
     <h2>${title}</h2>
     <p class="muted breakdown-note">Recurring contributions are smoothed (quarterly ÷ 3) across active months. One-offs count as actual cash on the date paid.</p>
-    ${cutoffNote}
     ${emptyState}
     ${recurringSection}
     ${oneOffSection}
@@ -1673,13 +1636,13 @@ function breakdownTableHtml(title, recurring, oneOff, recurringTotal, oneOffTota
 window.showRevenueBreakdown = function () {
   const { start, end } = periodRange(state.revenuePeriod);
   const d = buildRevenueBreakdownData(start, end);
-  openModal(breakdownTableHtml(`Revenue ${periodWord(state.revenuePeriod)}`, d.recurring, d.oneOff, d.recurringTotal, d.oneOffTotal, d.monthCount, start));
+  openModal(breakdownTableHtml(`Revenue ${periodWord(state.revenuePeriod)}`, d.recurring, d.oneOff, d.recurringTotal, d.oneOffTotal, d.monthCount));
 };
 
 window.showExpenseBreakdown = function () {
   const { start, end } = periodRange(state.revenuePeriod);
   const d = buildExpenseBreakdownData(start, end);
-  openModal(breakdownTableHtml(`Expenses ${periodWord(state.revenuePeriod)}`, d.recurring, d.oneOff, d.recurringTotal, d.oneOffTotal, d.monthCount, start));
+  openModal(breakdownTableHtml(`Expenses ${periodWord(state.revenuePeriod)}`, d.recurring, d.oneOff, d.recurringTotal, d.oneOffTotal, d.monthCount));
 };
 
 // Segmented period control
