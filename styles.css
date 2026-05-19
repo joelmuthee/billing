@@ -197,6 +197,34 @@ textarea { resize: vertical; min-height: 72px; }
 }
 .tabs { display: flex; gap: 2px; }
 #logout { margin-left: auto; }
+
+.tab {
+  position: relative;
+  padding: 8px 14px 10px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--muted);
+  border-radius: 6px 6px 0 0;
+  white-space: nowrap;
+  transition: color 0.15s ease, background 0.15s ease;
+  background: transparent;
+}
+.tab::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 0;
+  height: 2px;
+  background: var(--brand-orange);
+  border-radius: 2px 2px 0 0;
+  transform: translateX(-50%);
+  transition: width 0.22s cubic-bezier(0.22, 0.61, 0.36, 1), background 0.15s ease;
+}
+.tab:hover { color: var(--text); background: var(--brand-orange-soft); }
+.tab:hover::after { width: 60%; }
+.tab.active { color: var(--text); background: transparent; }
+.tab.active::after { width: 80%; }
 .tab {
   padding: 7px 14px;
   font-size: 14px;
@@ -938,16 +966,15 @@ button.filter-pill.active .filter-count {
   }
   .tab {
     flex: 1;
-    padding: 8px 6px;
+    padding: 8px 6px 10px;
     font-size: 12.5px;
     text-align: center;
     border-radius: 6px 6px 0 0;
   }
-  .tab.active {
-    background: var(--surface);
-    color: var(--text);
-    box-shadow: rgba(0,0,0,0.06) 0px 2px 0px 0px;
-  }
+  .tab:hover { background: var(--brand-orange-soft); color: var(--text); }
+  .tab.active { background: transparent; color: var(--text); box-shadow: none; }
+  .tab.active::after { width: 50%; }
+  .tab:hover::after { width: 40%; }
   .main { padding: 18px 14px 60px; }
   .card { padding: 16px; }
   .card.no-pad { padding: 0; }
