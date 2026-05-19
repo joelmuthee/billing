@@ -16,8 +16,27 @@ CREATE TABLE IF NOT EXISTS clients (
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','paused','churned','completed')),
   reminder_method TEXT NOT NULL DEFAULT 'whatsapp' CHECK (reminder_method IN ('whatsapp','email','kra_invoice','none')),
   services TEXT NOT NULL DEFAULT '[]',
+  upsell_notes TEXT,
+  upsell_followup_date TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS scheduled_payments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_id INTEGER NOT NULL,
+  amount INTEGER NOT NULL,
+  due_date TEXT NOT NULL,
+  description TEXT,
+  paid_on TEXT,
+  payment_id INTEGER,
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+  FOREIGN KEY (payment_id) REFERENCES payments(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_scheduled_client ON scheduled_payments(client_id);
+CREATE INDEX IF NOT EXISTS idx_scheduled_due ON scheduled_payments(due_date);
+CREATE INDEX IF NOT EXISTS idx_scheduled_paid ON scheduled_payments(paid_on);
 
 CREATE TABLE IF NOT EXISTS payments (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

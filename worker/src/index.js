@@ -8,7 +8,11 @@
 //   PUT    /api/clients/:id            → update client
 //   DELETE /api/clients/:id            → delete client (cascades payments)
 //   POST   /api/payments               → record payment, auto-bump client.next_due
+//                                        Accepts optional scheduled_payment_id to link.
 //   DELETE /api/payments/:id           → delete payment
+//   POST   /api/scheduled-payments     → create scheduled future payment for a client
+//   PUT    /api/scheduled-payments/:id → update
+//   DELETE /api/scheduled-payments/:id → delete
 //   POST   /api/expenses               → create expense
 //   PUT    /api/expenses/:id           → update expense
 //   DELETE /api/expenses/:id           → delete expense (cascades payments)
@@ -84,6 +88,17 @@ function validateClient(c) {
   if (c.reminder_method && !REMINDER_METHODS.includes(c.reminder_method)) {
     return `reminder_method must be one of ${REMINDER_METHODS.join(", ")}`;
   }
+  if (c.upsell_followup_date && !/^\d{4}-\d{2}-\d{2}$/.test(c.upsell_followup_date)) {
+    return "upsell_followup_date must be YYYY-MM-DD";
+  }
+  return null;
+}
+
+function validateScheduledPayment(s) {
+  if (!s || typeof s !== "object") return "body must be an object";
+  if (!Number.isInteger(s.client_id)) return "client_id is required";
+  if (typeof s.amount !== "number" || s.amount <= 0) return "amount must be a positive number";
+  if (!s.due_date || !/^\d{4}-\d{2}-\d{2}$/.test(s.due_date)) return "due_date must be YYYY-MM-DD";
   return null;
 }
 
@@ -154,6 +169,7 @@ export default {
       const payments = await env.DB.prepare("SELECT * FROM payments ORDER BY paid_on DESC, id DESC").all();
       const expenses = await env.DB.prepare("SELECT * FROM expenses ORDER BY name COLLATE NOCASE").all();
       const expensePayments = await env.DB.prepare("SELECT * FROM expense_payments ORDER BY paid_on DESC, id DESC").all();
+      const scheduled = await env.DB.prepare("SELECT * FROM scheduled_payments ORDER BY due_date ASC").all();
       const clients = (clientsRs.results || []).map((c) => ({
         ...c,
         services: parseServices(c.services),
@@ -163,6 +179,7 @@ export default {
         payments: payments.results || [],
         expenses: expenses.results || [],
         expense_payments: expensePayments.results || [],
+        scheduled_payments: scheduled.results || [],
       });
     }
 
@@ -173,8 +190,8 @@ export default {
       const next_due = body.next_due || (body.plan === "one-off" ? null : body.start_date);
       const status = body.status || (body.plan === "one-off" ? "active" : "active");
       const result = await env.DB.prepare(
-        `INSERT INTO clients (name, business, plan, amount, method, phone, email, notes, start_date, next_due, status, reminder_method, services)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO clients (name, business, plan, amount, method, phone, email, notes, start_date, next_due, status, reminder_method, services, upsell_notes, upsell_followup_date)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
         .bind(
           body.name.trim(),
@@ -189,7 +206,9 @@ export default {
           next_due,
           status,
           body.reminder_method || "whatsapp",
-          serializeServices(body.services)
+          serializeServices(body.services),
+          body.upsell_notes || null,
+          body.upsell_followup_date || null
         )
         .run();
       const id = result.meta.last_row_id;
@@ -207,7 +226,8 @@ export default {
         await env.DB.prepare(
           `UPDATE clients
            SET name = ?, business = ?, plan = ?, amount = ?, method = ?, phone = ?, email = ?, notes = ?,
-               start_date = ?, next_due = ?, status = ?, reminder_method = ?, services = ?
+               start_date = ?, next_due = ?, status = ?, reminder_method = ?, services = ?,
+               upsell_notes = ?, upsell_followup_date = ?
            WHERE id = ?`
         )
           .bind(
@@ -224,6 +244,8 @@ export default {
             body.status || "active",
             body.reminder_method || "whatsapp",
             serializeServices(body.services),
+            body.upsell_notes || null,
+            body.upsell_followup_date || null,
             id
           )
           .run();
@@ -261,9 +283,36 @@ export default {
         .run();
       const paymentId = insertResult.meta.last_row_id;
 
-      // Advance client.next_due (or mark one-off completed)
+      // If linked to a scheduled payment, mark it paid
+      if (Number.isInteger(body.scheduled_payment_id)) {
+        await env.DB.prepare(
+          "UPDATE scheduled_payments SET paid_on = ?, payment_id = ? WHERE id = ? AND client_id = ?"
+        )
+          .bind(body.paid_on, paymentId, body.scheduled_payment_id, body.client_id)
+          .run();
+      }
+
+      // Advance client.next_due (or mark one-off completed only if no unpaid scheduled remain)
       const newNextDue = bumpNextDue(client.plan, client.next_due, body.paid_on);
-      const newStatus = client.plan === "one-off" ? "completed" : client.status;
+      let newStatus = client.status;
+      if (client.plan === "one-off") {
+        const remainingRs = await env.DB.prepare(
+          "SELECT COUNT(*) AS n FROM scheduled_payments WHERE client_id = ? AND paid_on IS NULL"
+        ).bind(body.client_id).first();
+        const remaining = remainingRs ? remainingRs.n : 0;
+        if (remaining === 0) {
+          newStatus = "completed";
+          // Suggest a 3-month upsell follow-up if not already set
+          const existing = await env.DB.prepare(
+            "SELECT upsell_followup_date FROM clients WHERE id = ?"
+          ).bind(body.client_id).first();
+          if (existing && !existing.upsell_followup_date) {
+            const followup = addMonths(body.paid_on, 3);
+            await env.DB.prepare("UPDATE clients SET upsell_followup_date = ? WHERE id = ?")
+              .bind(followup, body.client_id).run();
+          }
+        }
+      }
       await env.DB.prepare("UPDATE clients SET next_due = ?, status = ? WHERE id = ?")
         .bind(newNextDue, newStatus, body.client_id)
         .run();
@@ -278,6 +327,60 @@ export default {
       const id = Number(paymentMatch[1]);
       await env.DB.prepare("DELETE FROM payments WHERE id = ?").bind(id).run();
       return json({ ok: true });
+    }
+
+    // ─────────── Scheduled payments ───────────
+
+    if (request.method === "POST" && path === "/api/scheduled-payments") {
+      const body = await readBody(request);
+      const err = validateScheduledPayment(body);
+      if (err) return json({ error: err }, 400);
+      const result = await env.DB.prepare(
+        `INSERT INTO scheduled_payments (client_id, amount, due_date, description, notes)
+         VALUES (?, ?, ?, ?, ?)`
+      )
+        .bind(
+          body.client_id,
+          Math.round(body.amount),
+          body.due_date,
+          body.description || null,
+          body.notes || null
+        )
+        .run();
+      const id = result.meta.last_row_id;
+      const created = await env.DB.prepare("SELECT * FROM scheduled_payments WHERE id = ?").bind(id).first();
+      return json({ scheduled_payment: created }, 201);
+    }
+
+    const scheduledMatch = path.match(/^\/api\/scheduled-payments\/(\d+)$/);
+    if (scheduledMatch) {
+      const id = Number(scheduledMatch[1]);
+      if (request.method === "PUT") {
+        const body = await readBody(request);
+        const err = validateScheduledPayment(body);
+        if (err) return json({ error: err }, 400);
+        await env.DB.prepare(
+          `UPDATE scheduled_payments
+           SET client_id = ?, amount = ?, due_date = ?, description = ?, notes = ?
+           WHERE id = ?`
+        )
+          .bind(
+            body.client_id,
+            Math.round(body.amount),
+            body.due_date,
+            body.description || null,
+            body.notes || null,
+            id
+          )
+          .run();
+        const updated = await env.DB.prepare("SELECT * FROM scheduled_payments WHERE id = ?").bind(id).first();
+        if (!updated) return json({ error: "not found" }, 404);
+        return json({ scheduled_payment: updated });
+      }
+      if (request.method === "DELETE") {
+        await env.DB.prepare("DELETE FROM scheduled_payments WHERE id = ?").bind(id).run();
+        return json({ ok: true });
+      }
     }
 
     // ─────────── Expenses ───────────

@@ -43,6 +43,7 @@ const state = {
   payments: [],
   expenses: [],
   expense_payments: [],
+  scheduled_payments: [],
   activeTab: 'dashboard',
   revenuePeriod: '30d',
 };
@@ -139,7 +140,18 @@ async function loadData() {
   state.payments = data.payments || [];
   state.expenses = data.expenses || [];
   state.expense_payments = data.expense_payments || [];
+  state.scheduled_payments = data.scheduled_payments || [];
   renderAll();
+}
+
+// Add N months to an ISO date, handling month-end overflow
+function addMonthsISO(iso, months) {
+  if (!iso) return null;
+  const [y, m, d] = iso.split('-').map(Number);
+  const target = new Date(Date.UTC(y, m - 1 + months, 1));
+  const lastDay = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
+  target.setUTCDate(Math.min(d, lastDay));
+  return target.toISOString().slice(0, 10);
 }
 
 // ────────── Auth ──────────
@@ -230,6 +242,7 @@ function renderAll() {
   renderKPIs();
   renderUpcoming();
   renderOverdue();
+  renderUpsellFollowups();
   renderRecent();
   renderClientsList();
   renderPaymentsList();
@@ -240,20 +253,55 @@ function renderAll() {
 function renderBanner() {
   const today = todayISO();
   const in7 = new Date(parseISO(today).getTime() + 7 * 86400000).toISOString().slice(0, 10);
-  const overdue = state.clients.filter((c) => c.status === 'active' && c.next_due && c.next_due < today);
-  const dueWeek = state.clients.filter((c) => c.status === 'active' && c.next_due && c.next_due >= today && c.next_due <= in7);
+  const overdue = upcomingItems().filter((it) => it.due < today);
+  const dueWeek = upcomingItems().filter((it) => it.due >= today && it.due <= in7);
+  const upsells = upsellDueClients();
 
   const el = $('#banner');
-  if (overdue.length === 0 && dueWeek.length === 0) {
+  if (overdue.length === 0 && dueWeek.length === 0 && upsells.length === 0) {
     el.classList.add('hidden');
     return;
   }
   const parts = [];
   if (overdue.length) parts.push(`<strong>${overdue.length} overdue</strong>`);
   if (dueWeek.length) parts.push(`${dueWeek.length} due this week`);
+  if (upsells.length) parts.push(`${upsells.length} upsell follow-up${upsells.length > 1 ? 's' : ''}`);
   el.innerHTML = `<span>${parts.join(' · ')}</span><span class="banner-hint">↓ scroll for details</span>`;
   el.classList.remove('hidden');
   el.classList.toggle('danger', overdue.length > 0);
+}
+
+// Returns a unified list of upcoming things to act on:
+//   - recurring client dues (from client.next_due)
+//   - unpaid scheduled payments
+// Each item: { kind, due, amount, client, label, scheduled? }
+function upcomingItems() {
+  const items = [];
+  for (const c of state.clients) {
+    if (c.status !== 'active' || !c.next_due) continue;
+    items.push({ kind: 'recurring', due: c.next_due, amount: c.amount, client: c });
+  }
+  for (const s of state.scheduled_payments) {
+    if (s.paid_on) continue;
+    const c = state.clients.find((x) => x.id === s.client_id);
+    if (!c) continue;
+    items.push({
+      kind: 'scheduled',
+      due: s.due_date,
+      amount: s.amount,
+      client: c,
+      scheduled: s,
+      label: s.description || 'Scheduled payment',
+    });
+  }
+  return items.sort((a, b) => a.due.localeCompare(b.due));
+}
+
+function upsellDueClients() {
+  const today = todayISO();
+  return state.clients
+    .filter((c) => c.upsell_followup_date && c.upsell_followup_date <= today && c.status !== 'churned')
+    .sort((a, b) => a.upsell_followup_date.localeCompare(b.upsell_followup_date));
 }
 
 // ────────── Reminder helpers ──────────
@@ -390,60 +438,141 @@ function countDueSoon() {
 function renderUpcoming() {
   const today = todayISO();
   const in30 = new Date(parseISO(today).getTime() + 30 * 86400000).toISOString().slice(0, 10);
-  const upcoming = state.clients
-    .filter((c) => c.status === 'active' && c.next_due && c.next_due >= today && c.next_due <= in30)
-    .sort((a, b) => a.next_due.localeCompare(b.next_due));
+  const upcoming = upcomingItems().filter((it) => it.due >= today && it.due <= in30);
 
   const el = $('#upcomingList');
   if (upcoming.length === 0) {
     el.innerHTML = '<div class="empty">Nothing due in the next 30 days.</div>';
     return;
   }
-  el.innerHTML = upcoming.map((c) => `
-    <div class="list-row">
+  el.innerHTML = upcoming.map((it) => upcomingRowHtml(it, 'upcoming')).join('');
+}
+
+function upcomingRowHtml(it, kind) {
+  const c = it.client;
+  if (it.kind === 'scheduled') {
+    return `
+      <div class="list-row ${kind === 'overdue' ? 'danger' : ''}">
+        <div>
+          <div class="primary">${escapeHtml(c.name)} <span class="muted-2" style="font-weight:400;">· ${escapeHtml(it.label)}</span></div>
+          <div class="sub">
+            <span class="badge plan-one-off">Scheduled</span>
+            ${kind === 'overdue'
+              ? `<span class="badge danger">${Math.abs(daysFromToday(it.due))} days late</span><span>Was due ${fmtDate(it.due)}</span>`
+              : `<span>Due ${fmtDate(it.due)} · ${fmtRelative(it.due)}</span>`}
+          </div>
+        </div>
+        <div class="actions">
+          <div class="amount num">${fmtKES(it.amount)}</div>
+          ${reminderAction(c, kind)}
+          <button class="btn-sm" onclick="paySchedule(${it.scheduled.id})">Mark paid</button>
+        </div>
+      </div>
+    `;
+  }
+  return `
+    <div class="list-row ${kind === 'overdue' ? 'danger' : ''}">
       <div>
         <div class="primary">${escapeHtml(c.name)}</div>
         <div class="sub">
           <span class="badge plan-${c.plan}">${planLabel(c.plan)}</span>
-          <span>Due ${fmtDate(c.next_due)} · ${fmtRelative(c.next_due)}</span>
+          ${kind === 'overdue'
+            ? `<span class="badge danger">${Math.abs(daysFromToday(it.due))} days late</span><span>Was due ${fmtDate(it.due)}</span>`
+            : `<span>Due ${fmtDate(it.due)} · ${fmtRelative(it.due)}</span>`}
         </div>
       </div>
       <div class="actions">
-        <div class="amount num">${fmtKES(c.amount)}</div>
-        ${reminderAction(c, 'upcoming')}
+        <div class="amount num">${fmtKES(it.amount)}</div>
+        ${reminderAction(c, kind)}
         <button class="btn-sm" onclick="quickPay(${c.id})">Mark paid</button>
       </div>
     </div>
-  `).join('');
+  `;
 }
 
 function renderOverdue() {
   const today = todayISO();
-  const overdue = state.clients
-    .filter((c) => c.status === 'active' && c.next_due && c.next_due < today)
-    .sort((a, b) => a.next_due.localeCompare(b.next_due));
+  const overdue = upcomingItems().filter((it) => it.due < today);
 
   const el = $('#overdueList');
   if (overdue.length === 0) {
     el.innerHTML = '<div class="empty">No overdue clients. Nice.</div>';
     return;
   }
-  el.innerHTML = overdue.map((c) => `
-    <div class="list-row danger">
+  el.innerHTML = overdue.map((it) => upcomingRowHtml(it, 'overdue')).join('');
+}
+
+function renderUpsellFollowups() {
+  const list = upsellDueClients();
+  const card = $('#upsellCard');
+  const el = $('#upsellList');
+  if (list.length === 0) {
+    card.hidden = true;
+    return;
+  }
+  card.hidden = false;
+  el.innerHTML = list.map((c) => `
+    <div class="list-row">
       <div>
-        <div class="primary">${escapeHtml(c.name)}</div>
+        <div class="primary">${escapeHtml(c.name)}${c.business ? ` <span class="muted-2" style="font-weight:400;">· ${escapeHtml(c.business)}</span>` : ''}</div>
         <div class="sub">
-          <span class="badge danger">${Math.abs(daysFromToday(c.next_due))} days late</span>
-          <span>Was due ${fmtDate(c.next_due)}</span>
+          <span class="badge warn">Follow up</span>
+          <span>Scheduled ${fmtDate(c.upsell_followup_date)} · ${fmtRelative(c.upsell_followup_date)}</span>
         </div>
+        ${c.upsell_notes ? `<div class="sub" style="margin-top:4px;">${escapeHtml(c.upsell_notes)}</div>` : ''}
       </div>
       <div class="actions">
-        <div class="amount num">${fmtKES(c.amount)}</div>
-        ${reminderAction(c, 'overdue')}
-        <button class="btn-sm" onclick="quickPay(${c.id})">Mark paid</button>
+        ${reminderAction(c, 'upcoming')}
+        <button class="btn-sm" onclick="snoozeUpsell(${c.id})">Snooze 30d</button>
+        <button class="btn-sm" onclick="clearUpsell(${c.id})">Done</button>
+        <button class="btn-sm" onclick="editClient(${c.id})">Edit</button>
       </div>
     </div>
   `).join('');
+}
+
+window.snoozeUpsell = async function (id) {
+  const c = state.clients.find((x) => x.id === id);
+  if (!c) return;
+  const newDate = addMonthsISO(todayISO(), 1);
+  const body = serializeClientForUpdate(c, { upsell_followup_date: newDate });
+  try {
+    await api(`/api/clients/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+    await loadData();
+    toast('Snoozed for 30 days');
+  } catch (err) { toast(err.message, 'error'); }
+};
+
+window.clearUpsell = async function (id) {
+  const c = state.clients.find((x) => x.id === id);
+  if (!c) return;
+  const body = serializeClientForUpdate(c, { upsell_followup_date: null });
+  try {
+    await api(`/api/clients/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+    await loadData();
+    toast('Cleared upsell follow-up');
+  } catch (err) { toast(err.message, 'error'); }
+};
+
+function serializeClientForUpdate(c, overrides = {}) {
+  return {
+    name: c.name,
+    business: c.business,
+    plan: c.plan,
+    amount: c.amount,
+    method: c.method,
+    phone: c.phone,
+    email: c.email,
+    notes: c.notes,
+    start_date: c.start_date,
+    next_due: c.next_due,
+    status: c.status,
+    reminder_method: c.reminder_method || 'whatsapp',
+    services: c.services || [],
+    upsell_notes: c.upsell_notes,
+    upsell_followup_date: c.upsell_followup_date,
+    ...overrides,
+  };
 }
 
 function renderRecent() {
@@ -502,6 +631,7 @@ function renderClientsList() {
         <div class="actions">
           <div class="amount num">${fmtKES(c.amount)}</div>
           <button class="btn-sm" onclick="quickPay(${c.id})">Pay</button>
+          <button class="btn-sm" onclick="addScheduled(${c.id})">Schedule</button>
           <button class="btn-sm" onclick="editClient(${c.id})">Edit</button>
           <button class="btn-sm danger" onclick="deleteClient(${c.id})">Delete</button>
         </div>
@@ -509,6 +639,72 @@ function renderClientsList() {
     `;
   }).join('');
 }
+
+// ────────── Scheduled payments ──────────
+
+window.addScheduled = function (clientId) {
+  const c = state.clients.find((x) => x.id === clientId);
+  if (!c) return;
+  openModal(`
+    <h2>Schedule a payment</h2>
+    <p class="muted" style="margin-bottom:14px;">For ${escapeHtml(c.name)}. Use this for staged invoices like deposit + balance.</p>
+    <form id="scheduledForm">
+      <label>
+        <span>What's it for? <span class="hint">(e.g. "Website balance")</span></span>
+        <input type="text" name="description" placeholder="Website balance" autofocus>
+      </label>
+      <div class="form-row">
+        <label>
+          <span>Amount (Ksh)</span>
+          <input type="number" name="amount" min="1" step="1" required>
+        </label>
+        <label>
+          <span>Due date</span>
+          <input type="date" name="due_date" required value="${addMonthsISO(todayISO(), 2)}">
+        </label>
+      </div>
+      <label>
+        <span>Notes <span class="hint">(optional)</span></span>
+        <textarea name="notes"></textarea>
+      </label>
+      <p class="error hidden" id="scheduledErr"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn-ghost" onclick="closeModal()">Cancel</button>
+        <button type="submit" class="btn-primary">Schedule</button>
+      </div>
+    </form>
+  `);
+  $('#scheduledForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const fd = new FormData(ev.target);
+    const body = {
+      client_id: c.id,
+      amount: Number(fd.get('amount')) || 0,
+      due_date: fd.get('due_date'),
+      description: (fd.get('description') || '').trim() || null,
+      notes: (fd.get('notes') || '').trim() || null,
+    };
+    try {
+      await api('/api/scheduled-payments', { method: 'POST', body: JSON.stringify(body) });
+      await loadData();
+      closeModal();
+      toast('Payment scheduled');
+    } catch (err) {
+      const errEl = $('#scheduledErr');
+      errEl.textContent = err.message;
+      errEl.classList.remove('hidden');
+    }
+  });
+};
+
+window.paySchedule = function (scheduledId) {
+  const s = state.scheduled_payments.find((x) => x.id === scheduledId);
+  if (!s) return;
+  const c = state.clients.find((x) => x.id === s.client_id);
+  if (!c) return;
+  // Re-use the payment modal but pre-fill from the scheduled item
+  recordPayment(c.id, { amount: s.amount, scheduled_payment_id: s.id, reference: s.description || '' });
+};
 
 function renderPaymentsList() {
   const el = $('#paymentsList');
@@ -1324,6 +1520,17 @@ function clientFormHtml(c) {
         <span>Notes <span class="hint">(optional)</span></span>
         <textarea name="notes">${isEdit && c.notes ? escapeHtml(c.notes) : ''}</textarea>
       </label>
+      <div class="form-section">
+        <div class="form-section-title">Upsell follow-up</div>
+        <label>
+          <span>What could you offer them next? <span class="hint">(optional)</span></span>
+          <textarea name="upsell_notes" placeholder="AI Chat, CRM, Social Planner, Ads…">${isEdit && c.upsell_notes ? escapeHtml(c.upsell_notes) : ''}</textarea>
+        </label>
+        <label>
+          <span>Remind me to follow up on <span class="hint">(defaults to 3 months out for new one-offs)</span></span>
+          <input type="date" name="upsell_followup_date" value="${isEdit && c.upsell_followup_date ? c.upsell_followup_date : (!isEdit ? addMonthsISO(todayISO(), 3) : '')}">
+        </label>
+      </div>
       <p class="error hidden" id="clientFormErr"></p>
       <div class="modal-actions">
         <button type="button" class="btn-ghost" onclick="closeModal()">Cancel</button>
@@ -1353,6 +1560,8 @@ window.editClient = function (id) {
       status: fd.get('status') || 'active',
       reminder_method: fd.get('reminder_method') || 'whatsapp',
       services: fd.getAll('services'),
+      upsell_notes: (fd.get('upsell_notes') || '').trim() || null,
+      upsell_followup_date: fd.get('upsell_followup_date') || null,
     };
     try {
       if (c) await api(`/api/clients/${c.id}`, { method: 'PUT', body: JSON.stringify(body) });
@@ -1381,21 +1590,25 @@ window.deleteClient = async function (id) {
   }
 };
 
-function paymentFormHtml(preselect) {
-  const opts = state.clients
+function paymentFormHtml(preselect, opts) {
+  const clientOpts = state.clients
     .filter((c) => c.status === 'active' || c.id === (preselect && preselect.id))
     .map((c) => `<option value="${c.id}" ${preselect && preselect.id === c.id ? 'selected' : ''}>${escapeAttr(c.name)} — ${fmtKES(c.amount)}</option>`)
     .join('');
-  const amount = preselect ? preselect.amount : '';
+  const amount = (opts && opts.amount != null) ? opts.amount : (preselect ? preselect.amount : '');
   const method = preselect && preselect.method ? preselect.method : '';
+  const refDefault = opts && opts.reference ? opts.reference : '';
+  const scheduledId = opts && opts.scheduled_payment_id ? opts.scheduled_payment_id : '';
   return `
     <h2>Record payment</h2>
+    ${scheduledId ? '<p class="muted" style="margin-bottom:14px;">This will also clear the scheduled item.</p>' : ''}
     <form id="paymentForm">
+      <input type="hidden" name="scheduled_payment_id" value="${scheduledId}">
       <label>
         <span>Client</span>
-        <select name="client_id" required>
+        <select name="client_id" required ${scheduledId ? 'disabled' : ''}>
           <option value="">Pick a client…</option>
-          ${opts}
+          ${clientOpts}
         </select>
       </label>
       <div class="form-row">
@@ -1421,7 +1634,7 @@ function paymentFormHtml(preselect) {
         </label>
         <label>
           <span>Reference <span class="hint">(Mpesa code, cheque #)</span></span>
-          <input type="text" name="reference">
+          <input type="text" name="reference" value="${escapeAttr(refDefault)}">
         </label>
       </div>
       <label>
@@ -1437,28 +1650,35 @@ function paymentFormHtml(preselect) {
   `;
 }
 
-window.recordPayment = function (clientId) {
+window.recordPayment = function (clientId, opts) {
   const preselect = clientId != null ? state.clients.find((c) => c.id === clientId) : null;
-  openModal(paymentFormHtml(preselect));
-  // Auto-fill amount when client changes
-  $('#paymentForm select[name="client_id"]').addEventListener('change', (e) => {
-    const c = state.clients.find((x) => x.id === Number(e.target.value));
-    if (c) {
-      $('#paymentForm input[name="amount"]').value = c.amount;
-      if (c.method) $('#paymentForm select[name="method"]').value = c.method;
-    }
-  });
+  openModal(paymentFormHtml(preselect, opts));
+  // Auto-fill amount when client changes (only when no scheduled preset)
+  if (!opts || !opts.scheduled_payment_id) {
+    $('#paymentForm select[name="client_id"]').addEventListener('change', (e) => {
+      const c = state.clients.find((x) => x.id === Number(e.target.value));
+      if (c) {
+        $('#paymentForm input[name="amount"]').value = c.amount;
+        if (c.method) $('#paymentForm select[name="method"]').value = c.method;
+      }
+    });
+  }
   $('#paymentForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
+    const clientIdValue = preselect && opts && opts.scheduled_payment_id
+      ? preselect.id
+      : Number(fd.get('client_id'));
+    const sId = fd.get('scheduled_payment_id');
     const body = {
-      client_id: Number(fd.get('client_id')),
+      client_id: clientIdValue,
       amount: Number(fd.get('amount')) || 0,
       paid_on: fd.get('paid_on'),
       method: fd.get('method') || null,
-      reference: fd.get('reference').trim() || null,
-      notes: fd.get('notes').trim() || null,
+      reference: (fd.get('reference') || '').trim() || null,
+      notes: (fd.get('notes') || '').trim() || null,
     };
+    if (sId) body.scheduled_payment_id = Number(sId);
     try {
       await api('/api/payments', { method: 'POST', body: JSON.stringify(body) });
       await loadData();
