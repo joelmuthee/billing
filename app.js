@@ -68,7 +68,7 @@ const fmtRelative = (iso) => {
 
 const planLabel = (plan) => {
   if (plan === 'monthly') return 'Monthly';
-  if (plan === 'quarterly') return 'Quarterly';
+  if (plan === 'quarterly') return 'Every 3 months';
   return 'One off';
 };
 
@@ -675,7 +675,7 @@ function clientFormHtml(c) {
           <span>Plan</span>
           <select name="plan" required>
             <option value="monthly" ${isEdit && c.plan === 'monthly' ? 'selected' : ''}>Monthly</option>
-            <option value="quarterly" ${isEdit && c.plan === 'quarterly' ? 'selected' : ''}>Quarterly</option>
+            <option value="quarterly" ${isEdit && c.plan === 'quarterly' ? 'selected' : ''}>Every 3 months</option>
             <option value="one-off" ${isEdit && c.plan === 'one-off' ? 'selected' : ''}>One off</option>
           </select>
         </label>
