@@ -782,6 +782,121 @@ button.filter-pill.active .filter-count {
   .kpi-row .kpi-card:nth-child(2) { animation-delay: 0.06s; }
   .kpi-row .kpi-card:nth-child(3) { animation-delay: 0.12s; }
   .kpi-row .kpi-card:nth-child(4) { animation-delay: 0.18s; }
+
+  /* ─────────── Micro-interactions ─────────── */
+
+  /* List rows: subtle left-accent reveal in brand orange + indent */
+  .list-row {
+    position: relative;
+    transition: background 0.18s ease, padding-left 0.18s cubic-bezier(0.22, 0.61, 0.36, 1);
+  }
+  .list-row::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 6px;
+    bottom: 6px;
+    width: 0;
+    background: var(--brand-orange);
+    border-radius: 0 2px 2px 0;
+    transition: width 0.18s cubic-bezier(0.22, 0.61, 0.36, 1);
+  }
+  .card:not(.no-pad) .list-row:hover { padding-left: 10px; }
+  .card.no-pad .list-row:hover { padding-left: 24px; }
+  .list-row:hover::before { width: 3px; }
+  .list-row.danger::before { background: var(--red); }
+
+  /* Small action buttons: micro-lift on hover, press on click */
+  .btn-sm {
+    transition: background 0.15s ease, color 0.15s ease, transform 0.12s ease, box-shadow 0.15s ease;
+  }
+  .btn-sm:hover {
+    transform: translateY(-1px);
+    box-shadow: rgba(16, 24, 40, 0.12) 0px 2px 4px, rgb(235, 235, 235) 0px 0px 0px 1px;
+  }
+  .btn-sm:active { transform: translateY(0); }
+
+  /* Primary buttons */
+  .btn-primary, .btn-ghost {
+    transition: background 0.15s ease, opacity 0.15s ease, transform 0.12s ease, box-shadow 0.15s ease;
+  }
+  .btn-primary:hover { transform: translateY(-1px); box-shadow: rgba(16, 24, 40, 0.18) 0px 4px 10px; }
+  .btn-primary:active { transform: translateY(0); }
+  .btn-ghost:hover { transform: translateY(-1px); }
+  .btn-ghost:active { transform: translateY(0); }
+
+  /* Tabs */
+  .tab { transition: background 0.18s ease, color 0.15s ease; }
+
+  /* Filter pills */
+  button.filter-pill {
+    transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+  }
+  button.filter-pill:not(.active):hover {
+    color: var(--text);
+    background: var(--brand-orange-soft);
+  }
+  .filter-count { transition: background 0.15s ease, color 0.15s ease; }
+
+  /* Service chips */
+  .chip {
+    transition: transform 0.12s ease, box-shadow 0.15s ease;
+  }
+  .chip:hover {
+    transform: translateY(-1px);
+    box-shadow: rgba(16, 24, 40, 0.10) 0px 2px 4px, rgb(235, 235, 235) 0px 0px 0px 1px;
+  }
+
+  /* Segmented control: subtle warm tint when hovering an inactive option */
+  .seg-control button {
+    transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .seg-control button:not(.active):hover {
+    background: var(--brand-orange-soft);
+    color: var(--text);
+  }
+
+  /* Bar chart: orange tint + value pop on hover */
+  .bar {
+    transition: background 0.2s ease, transform 0.2s cubic-bezier(0.22, 0.61, 0.36, 1);
+    transform-origin: bottom;
+  }
+  .bar-col:hover .bar {
+    background: var(--brand-orange);
+    transform: scaleY(1.02);
+  }
+  .bar-value { transition: color 0.18s ease, transform 0.18s ease, font-weight 0.18s; }
+  .bar-col:hover .bar-value {
+    color: var(--brand-orange-deep);
+    transform: translateY(-2px);
+  }
+
+  /* "See breakdown →" arrow nudges right when the parent card is hovered */
+  .breakdown-link { transition: color 0.15s ease, gap 0.15s ease; }
+  .kpi-card.clickable:hover .breakdown-link { gap: 8px; }
+
+  /* Breakdown table rows: warm hover tint */
+  .breakdown-table tr { transition: background 0.12s ease; }
+  .breakdown-table tr:hover td {
+    background: var(--brand-orange-soft);
+  }
+
+  /* Banner: subtle entrance from above */
+  .banner {
+    animation: slide-down 0.4s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+  }
+
+  /* Inputs: focus glow */
+  input, select, textarea {
+    transition: box-shadow 0.15s ease, outline-color 0.15s ease;
+  }
+
+  /* Toast slide-in already styled */
+}
+
+@keyframes slide-down {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 @keyframes fade-in-up {
