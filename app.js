@@ -9,7 +9,7 @@ const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
 // Service catalogue, sourced from essenceautomations.com
 const SERVICES_CATEGORIES = [
   { name: 'Get Found', items: [
-    { value: 'websites', label: 'Ultra-modern Websites' },
+    { value: 'websites', label: 'Website' },
     { value: 'gbp-booster', label: 'GBP Booster' },
     { value: 'seo-content', label: 'SEO Content Engine' },
     { value: 'email-prospecting', label: 'Email Prospecting' },
