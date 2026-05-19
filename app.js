@@ -118,13 +118,17 @@ const methodLabel = (m) => {
 // ────────── API ──────────
 
 async function api(path, opts = {}) {
-  const url = state.apiBase.replace(/\/$/, '') + path;
+  // Cache-bust GETs with a timestamp so the browser HTTP cache can't serve
+  // a stale /api/data response. Also pass cache:'no-store' on the request.
+  const method = (opts.method || 'GET').toUpperCase();
+  const sep = path.includes('?') ? '&' : '?';
+  const url = state.apiBase.replace(/\/$/, '') + path + (method === 'GET' ? `${sep}_t=${Date.now()}` : '');
   const headers = {
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${state.token}`,
     ...(opts.headers || {}),
   };
-  const res = await fetch(url, { ...opts, headers });
+  const res = await fetch(url, { ...opts, headers, cache: 'no-store' });
   let data = null;
   try { data = await res.json(); } catch {}
   if (res.status === 401) {

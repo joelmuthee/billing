@@ -32,7 +32,12 @@ const CORS = {
 const json = (data, status = 200, extra = {}) =>
   new Response(JSON.stringify(data), {
     status,
-    headers: { "Content-Type": "application/json", ...CORS, ...extra },
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store, no-cache, must-revalidate",
+      ...CORS,
+      ...extra,
+    },
   });
 
 const isAuthed = (req, env) => {
