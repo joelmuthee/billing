@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260519-12';
+const APP_VERSION = '20260519-13';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
 
 // Service catalogue, sourced from essenceautomations.com
@@ -1541,8 +1541,15 @@ function renderRevenue() {
 }
 
 function periodWord(p) {
-  if (p === '30d') return '(this month)';
-  if (p === 'lastmo') return '(last month)';
+  const today = parseISO(todayISO());
+  if (p === '30d') {
+    return `(${today.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })})`;
+  }
+  if (p === 'lastmo') {
+    const d = new Date(today);
+    d.setMonth(d.getMonth() - 1);
+    return `(${d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })})`;
+  }
   if (p === '6mo') return '(6 months)';
   if (p === '1yr') return '(12 months)';
   return '(all time)';
