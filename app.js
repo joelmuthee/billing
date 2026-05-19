@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260519-13';
+const APP_VERSION = '20260519-14';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
 
 // Service catalogue, sourced from essenceautomations.com
@@ -49,6 +49,7 @@ const state = {
   activeTab: 'dashboard',
   revenuePeriod: '30d',
   clientFilter: 'all',
+  upcomingDays: 30,
 };
 
 // ────────── Formatting helpers ──────────
@@ -463,12 +464,16 @@ function countDueSoon() {
 
 function renderUpcoming() {
   const today = todayISO();
-  const in30 = addDaysISO(today, 30);
-  const upcoming = upcomingItems().filter((it) => it.due >= today && it.due <= in30);
+  const days = state.upcomingDays;
+  const inN = addDaysISO(today, days);
+  const upcoming = upcomingItems().filter((it) => it.due >= today && it.due <= inN);
+
+  const titleEl = $('#upcomingTitle');
+  if (titleEl) titleEl.textContent = `Upcoming (next ${days} days)`;
 
   const el = $('#upcomingList');
   if (upcoming.length === 0) {
-    el.innerHTML = '<div class="empty">Nothing due in the next 30 days.</div>';
+    el.innerHTML = `<div class="empty">Nothing due in the next ${days} days.</div>`;
     return;
   }
   el.innerHTML = upcoming.map((it) => upcomingRowHtml(it, 'upcoming')).join('');
@@ -1831,6 +1836,14 @@ $('#logExpensePaymentBtn').addEventListener('click', () => logExpensePayment(nul
 $('#quickExpenseBtn').addEventListener('click', () => recordQuickExpense());
 $('#dashAddClientBtn').addEventListener('click', () => editClient(null));
 $('#dashRecordPaymentBtn').addEventListener('click', () => recordPayment(null));
+
+$('#upcomingWindow').addEventListener('click', (e) => {
+  const btn = e.target.closest('button');
+  if (!btn) return;
+  state.upcomingDays = Number(btn.dataset.days);
+  $$('#upcomingWindow button').forEach((b) => b.classList.toggle('active', b === btn));
+  renderUpcoming();
+});
 
 $('#clientFilter').addEventListener('click', (e) => {
   const btn = e.target.closest('button');
