@@ -624,6 +624,50 @@ function renderRecent() {
   }).join('');
 }
 
+function renderClientsKpis() {
+  const today = todayISO();
+  const monthStart = today.slice(0, 7) + '-01';
+  const last3Start = addMonthsISO(today, -3);
+  const last12Start = addMonthsISO(today, -12);
+
+  // "Added" = when the business relationship started, not when the row was
+  // created in the dashboard (Joel back-fills old clients with their real
+  // start_date going back to 2018).
+  const inSince = (start) => state.clients.filter((c) => c.start_date >= start && c.status !== 'churned');
+  const isRecurring = (c) => c.plan === 'monthly' || c.plan === 'quarterly';
+  const isOneOff = (c) => c.plan === 'one-off';
+
+  const subLine = (list) =>
+    `${list.filter(isRecurring).length} recurring · ${list.filter(isOneOff).length} one off`;
+
+  const thisMonth = inSince(monthStart);
+  const last3 = inSince(last3Start);
+  const last12 = inSince(last12Start);
+
+  $('#clientsKpiRow').innerHTML = `
+    <div class="kpi-card">
+      <div class="kpi-label">Added this month</div>
+      <div class="kpi-value">${thisMonth.length}</div>
+      <div class="kpi-sub">${subLine(thisMonth)}</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Last 3 months</div>
+      <div class="kpi-value">${last3.length}</div>
+      <div class="kpi-sub">${subLine(last3)}</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Last 12 months</div>
+      <div class="kpi-value">${last12.length}</div>
+      <div class="kpi-sub">${subLine(last12)}</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">All time</div>
+      <div class="kpi-value">${state.clients.filter((c) => c.status !== 'churned').length}</div>
+      <div class="kpi-sub">${subLine(state.clients.filter((c) => c.status !== 'churned'))}</div>
+    </div>
+  `;
+}
+
 function renderClientFilter() {
   const all = state.clients.length;
   const recurring = state.clients.filter((c) => c.plan === 'monthly' || c.plan === 'quarterly').length;
@@ -637,6 +681,7 @@ function renderClientFilter() {
 }
 
 function renderClientsList() {
+  renderClientsKpis();
   renderClientFilter();
   const el = $('#clientsList');
   if (state.clients.length === 0) {
