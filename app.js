@@ -5,6 +5,8 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
+const APP_VERSION = '20260519-10';
+console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
 
 // Service catalogue, sourced from essenceautomations.com
 const SERVICES_CATEGORIES = [
@@ -2168,6 +2170,13 @@ function escapeAttr(s) { return escapeHtml(s); }
 // ────────── Boot ──────────
 
 (async function boot() {
+  // Tiny version badge in bottom-right corner so cache issues are self-diagnosable
+  const badge = document.createElement('div');
+  badge.id = 'versionBadge';
+  badge.textContent = 'v' + APP_VERSION;
+  badge.title = 'App build — useful for diagnosing cache issues. If this doesn\'t match the latest deployed version, hard refresh.';
+  document.body.appendChild(badge);
+
   if (state.token) {
     try {
       await api('/api/auth', { method: 'POST' });

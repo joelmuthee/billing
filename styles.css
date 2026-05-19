@@ -292,6 +292,26 @@ textarea { resize: vertical; min-height: 72px; }
 }
 .bar-col.current .bar { background: var(--blue); }
 .bar-col.current .bar-value { color: var(--blue); font-weight: 600; }
+
+/* Version badge in the bottom-right corner */
+#versionBadge {
+  position: fixed;
+  bottom: 8px;
+  right: 10px;
+  font-family: "Geist Mono", ui-monospace, monospace;
+  font-size: 10px;
+  color: var(--muted-2);
+  opacity: 0.4;
+  pointer-events: auto;
+  user-select: none;
+  z-index: 30;
+  background: var(--bg);
+  padding: 2px 6px;
+  border-radius: 4px;
+  box-shadow: var(--shadow-light);
+  transition: opacity 0.15s;
+}
+#versionBadge:hover { opacity: 1; }
 .breakdown-section { margin-bottom: 22px; }
 .breakdown-section-title {
   font-family: "Geist Mono", ui-monospace, monospace;
