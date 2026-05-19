@@ -1,29 +1,37 @@
 /* Clients Dashboard — Vercel-inspired (Geist + shadow-as-border) */
 
 :root {
+  /* Essence Automations brand */
+  --brand-orange: #ff8424;       /* primary orange — used for active states, current month, focus ring */
+  --brand-orange-mid: #ff7c13;   /* mid orange — hover */
+  --brand-orange-deep: #c25400;  /* AA-contrast orange for links + badge text on white */
+  --brand-orange-soft: #fff4eb;  /* soft orange bg for tinted surfaces */
+  --brand-dark: #101828;         /* primary text, brand-aligned */
+  --brand-muted: #667085;        /* secondary text, brand-aligned */
+
   --bg: #ffffff;
-  --text: #171717;
+  --text: var(--brand-dark);
   --muted: #4d4d4d;
-  --muted-2: #666666;
+  --muted-2: var(--brand-muted);
   --placeholder: #808080;
-  --surface: #fafafa;
+  --surface: #fcfcfd;
   --border-soft: #ebebeb;
-  --link: #0072f5;
-  --focus: hsla(212, 100%, 48%, 1);
-  --shadow-border: rgba(0, 0, 0, 0.08) 0px 0px 0px 1px;
+  --link: var(--brand-orange-deep);
+  --focus: var(--brand-orange);
+  --shadow-border: rgba(16, 24, 40, 0.08) 0px 0px 0px 1px;
   --shadow-light: rgb(235, 235, 235) 0px 0px 0px 1px;
-  --shadow-card: rgba(0,0,0,0.08) 0px 0px 0px 1px, rgba(0,0,0,0.04) 0px 2px 2px, #fafafa 0px 0px 0px 1px;
-  --shadow-card-hover: rgba(0,0,0,0.10) 0px 0px 0px 1px, rgba(0,0,0,0.06) 0px 4px 8px, #fafafa 0px 0px 0px 1px;
+  --shadow-card: rgba(16, 24, 40, 0.08) 0px 0px 0px 1px, rgba(16, 24, 40, 0.04) 0px 2px 2px, #fcfcfd 0px 0px 0px 1px;
+  --shadow-card-hover: rgba(16, 24, 40, 0.10) 0px 0px 0px 1px, rgba(16, 24, 40, 0.06) 0px 4px 8px, #fcfcfd 0px 0px 0px 1px;
   --red: #ff5b4f;
   --red-soft: #fff1f0;
   --pink: #de1d8d;
-  --blue: #0a72ef;
+  --blue: var(--brand-orange);    /* alias — "blue" accents map to brand orange */
   --green: #0a6e2e;
   --green-soft: #e6f7ed;
   --amber: #b85c00;
   --amber-soft: #fff4e5;
-  --badge-bg: #ebf5ff;
-  --badge-text: #0068d6;
+  --badge-bg: var(--brand-orange-soft);
+  --badge-text: var(--brand-orange-deep);
   --purple-soft: #fdf4ff;
 }
 
@@ -232,7 +240,7 @@ textarea { resize: vertical; min-height: 72px; }
   transition: box-shadow 0.18s, transform 0.18s;
 }
 .kpi-card.clickable:hover {
-  box-shadow: rgba(0,0,0,0.10) 0px 0px 0px 1px, rgba(0,0,0,0.06) 0px 6px 12px, #fafafa 0px 0px 0px 1px;
+  box-shadow: var(--shadow-card-hover);
   transform: translateY(-1px);
 }
 .kpi-card .breakdown-link {
