@@ -1,6 +1,16 @@
-# Clients Dashboard
+# Billing
 
 Personal billing dashboard for tracking GHL clients (monthly, quarterly, one-off) and revenue. Vercel-inspired UI, Cloudflare Pages + Workers + D1.
+
+**Live**: https://billing.essenceautomations.com
+**Worker API**: https://clients-dashboard-api.stawisystems.workers.dev
+**Repo**: https://github.com/joelmuthee/billing
+
+## Cloudflare project naming
+
+The repo is `billing`. The CF Pages project is also `billing` (auto-created via GitHub integration). The CF Worker is still `clients-dashboard-api` — renaming the worker would invalidate `wrangler.toml` and the bearer-token secret, so leave it.
+
+**GitHub → Pages auto-deploy is unreliable** (silently stops after hours/days — known CF bug). Don't rely on it. Every code change needs a manual `wrangler pages deploy` from your machine. The commands below are the source of truth.
 
 ## What it does
 
@@ -61,7 +71,7 @@ From the project root (not `worker/`):
 
 ```powershell
 $env:CLOUDFLARE_ACCOUNT_ID = "58685495706b973821d77208248c66fc"
-npx wrangler pages deploy . --project-name=clients-dashboard --branch=master --commit-dirty=true
+npx wrangler pages deploy . --project-name=billing --branch=master --commit-dirty=true
 ```
 
 First run will prompt to create the Pages project. After that, the URL is `https://clients-dashboard.pages.dev`.
@@ -94,7 +104,7 @@ npx wrangler deploy
 
 # Front-end changes
 cd ..
-npx wrangler pages deploy . --project-name=clients-dashboard --branch=master --commit-dirty=true
+npx wrangler pages deploy . --project-name=billing --branch=master --commit-dirty=true
 ```
 
 ## Schema migrations later
