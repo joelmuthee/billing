@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260519-11';
+const APP_VERSION = '20260519-12';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
 
 // Service catalogue, sourced from essenceautomations.com
@@ -1599,6 +1599,8 @@ function shortNum(n) {
 }
 
 function renderTopClients(startIso, endIso) {
+  const titleEl = $('#topClientsTitle');
+  if (titleEl) titleEl.textContent = `Top clients ${periodWord(state.revenuePeriod)}`;
   const rows = state.clients
     .map((c) => ({ name: c.name, total: clientPeriodAccrual(c, startIso, endIso) }))
     .filter((r) => r.total > 0)
