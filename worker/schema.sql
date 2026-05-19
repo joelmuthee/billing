@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS clients (
   services TEXT NOT NULL DEFAULT '[]',
   upsell_notes TEXT,
   upsell_followup_date TEXT,
+  invoice_sent_for_next_due TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -29,6 +30,7 @@ CREATE TABLE IF NOT EXISTS scheduled_payments (
   description TEXT,
   paid_on TEXT,
   payment_id INTEGER,
+  invoice_sent_on TEXT,
   notes TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,

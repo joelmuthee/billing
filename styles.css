@@ -747,6 +747,15 @@ button.filter-pill.active .filter-count {
 }
 .btn-sm.email:hover { background: var(--badge-bg); color: var(--badge-text); }
 
+/* "Mark invoiced" CTA — stands out so it doesn't blend with regular row actions */
+.btn-sm.invoice-cta {
+  background: var(--brand-orange-soft);
+  color: var(--brand-orange-deep);
+  font-weight: 600;
+  box-shadow: var(--shadow-light);
+}
+.btn-sm.invoice-cta:hover { background: var(--brand-orange); color: #fff; }
+
 /* Services multi-select form */
 .services-grid {
   display: grid;

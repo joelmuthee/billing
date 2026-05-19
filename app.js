@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260519-15';
+const APP_VERSION = '20260519-16';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
 
 // Service catalogue, sourced from essenceautomations.com
@@ -302,12 +302,18 @@ function renderBanner() {
 // Returns a unified list of upcoming things to act on:
 //   - recurring client dues (from client.next_due)
 //   - unpaid scheduled payments
-// Each item: { kind, due, amount, client, label, scheduled? }
+// Each item: { kind, due, amount, client, label, scheduled?, invoiceSent }
 function upcomingItems() {
   const items = [];
   for (const c of state.clients) {
     if (c.status !== 'active' || !c.next_due) continue;
-    items.push({ kind: 'recurring', due: c.next_due, amount: c.amount, client: c });
+    items.push({
+      kind: 'recurring',
+      due: c.next_due,
+      amount: c.amount,
+      client: c,
+      invoiceSent: c.invoice_sent_for_next_due === c.next_due,
+    });
   }
   for (const s of state.scheduled_payments) {
     if (s.paid_on) continue;
@@ -320,10 +326,25 @@ function upcomingItems() {
       client: c,
       scheduled: s,
       label: s.description || 'Scheduled payment',
+      invoiceSent: !!s.invoice_sent_on,
     });
   }
   return items.sort((a, b) => a.due.localeCompare(b.due));
 }
+
+window.toggleInvoice = async function (kind, id, currentlySent) {
+  const sent = !currentlySent;
+  const path = kind === 'scheduled'
+    ? `/api/scheduled-payments/${id}/invoice`
+    : `/api/clients/${id}/invoice`;
+  try {
+    await api(path, { method: 'POST', body: JSON.stringify({ sent }) });
+    await loadData();
+    toast(sent ? 'Invoice marked sent' : 'Invoice unmarked');
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+};
 
 function upsellDueClients() {
   const today = todayISO();
@@ -479,6 +500,21 @@ function renderUpcoming() {
   el.innerHTML = upcoming.map((it) => upcomingRowHtml(it, 'upcoming')).join('');
 }
 
+function invoiceBadge(it) {
+  if (it.invoiceSent) {
+    return `<span class="badge ok">✓ Invoiced</span>`;
+  }
+  return `<span class="badge danger">Invoice needed</span>`;
+}
+
+function invoiceToggleButton(it) {
+  const idArg = it.kind === 'scheduled' ? it.scheduled.id : it.client.id;
+  if (it.invoiceSent) {
+    return `<button class="btn-sm" onclick="toggleInvoice('${it.kind}', ${idArg}, true)" title="Unmark invoice">↩ Invoice</button>`;
+  }
+  return `<button class="btn-sm invoice-cta" onclick="toggleInvoice('${it.kind}', ${idArg}, false)">+ Mark invoiced</button>`;
+}
+
 function upcomingRowHtml(it, kind) {
   const c = it.client;
   if (it.kind === 'scheduled') {
@@ -488,6 +524,7 @@ function upcomingRowHtml(it, kind) {
           <div class="primary">${escapeHtml(c.name)} <span class="muted-2" style="font-weight:400;">· ${escapeHtml(it.label)}</span></div>
           <div class="sub">
             <span class="badge plan-one-off">Scheduled</span>
+            ${invoiceBadge(it)}
             ${kind === 'overdue'
               ? `<span class="badge danger">${Math.abs(daysFromToday(it.due))} days late</span><span>Was due ${fmtDate(it.due)}</span>`
               : `<span>Due ${fmtDate(it.due)} · ${fmtRelative(it.due)}</span>`}
@@ -495,6 +532,7 @@ function upcomingRowHtml(it, kind) {
         </div>
         <div class="actions">
           <div class="amount num">${fmtKES(it.amount)}</div>
+          ${invoiceToggleButton(it)}
           ${reminderAction(c, kind)}
           <button class="btn-sm" onclick="paySchedule(${it.scheduled.id})">Mark paid</button>
         </div>
@@ -507,6 +545,7 @@ function upcomingRowHtml(it, kind) {
         <div class="primary">${escapeHtml(c.name)}</div>
         <div class="sub">
           <span class="badge plan-${c.plan}">${planLabel(c.plan)}</span>
+          ${invoiceBadge(it)}
           ${kind === 'overdue'
             ? `<span class="badge danger">${Math.abs(daysFromToday(it.due))} days late</span><span>Was due ${fmtDate(it.due)}</span>`
             : `<span>Due ${fmtDate(it.due)} · ${fmtRelative(it.due)}</span>`}
@@ -514,6 +553,7 @@ function upcomingRowHtml(it, kind) {
       </div>
       <div class="actions">
         <div class="amount num">${fmtKES(it.amount)}</div>
+        ${invoiceToggleButton(it)}
         ${reminderAction(c, kind)}
         <button class="btn-sm" onclick="quickPay(${c.id})">Mark paid</button>
       </div>

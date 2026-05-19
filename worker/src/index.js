@@ -334,6 +334,33 @@ export default {
       return json({ ok: true });
     }
 
+    // ─────────── Invoice toggle ───────────
+    const clientInvoiceMatch = path.match(/^\/api\/clients\/(\d+)\/invoice$/);
+    if (clientInvoiceMatch && request.method === "POST") {
+      const id = Number(clientInvoiceMatch[1]);
+      const body = await readBody(request);
+      const client = await env.DB.prepare("SELECT * FROM clients WHERE id = ?").bind(id).first();
+      if (!client) return json({ error: "not found" }, 404);
+      // When sent, stamp with the client's current next_due. When unsent, null.
+      const newValue = body && body.sent ? client.next_due : null;
+      await env.DB.prepare("UPDATE clients SET invoice_sent_for_next_due = ? WHERE id = ?")
+        .bind(newValue, id).run();
+      const updated = await env.DB.prepare("SELECT * FROM clients WHERE id = ?").bind(id).first();
+      return json({ client: updated });
+    }
+
+    const scheduledInvoiceMatch = path.match(/^\/api\/scheduled-payments\/(\d+)\/invoice$/);
+    if (scheduledInvoiceMatch && request.method === "POST") {
+      const id = Number(scheduledInvoiceMatch[1]);
+      const body = await readBody(request);
+      const newValue = body && body.sent ? new Date().toISOString().slice(0, 10) : null;
+      await env.DB.prepare("UPDATE scheduled_payments SET invoice_sent_on = ? WHERE id = ?")
+        .bind(newValue, id).run();
+      const updated = await env.DB.prepare("SELECT * FROM scheduled_payments WHERE id = ?").bind(id).first();
+      if (!updated) return json({ error: "not found" }, 404);
+      return json({ scheduled_payment: updated });
+    }
+
     // ─────────── Scheduled payments ───────────
 
     if (request.method === "POST" && path === "/api/scheduled-payments") {
