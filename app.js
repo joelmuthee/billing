@@ -1470,10 +1470,22 @@ function buildRevenueBreakdownData(startIso, endIso) {
   const recurring = state.clients
     .filter((c) => c.plan !== 'one-off')
     .map((c) => {
-      let monthsActive = 0;
-      for (const m of months) if (entityActiveInMonth(c, m)) monthsActive++;
+      const monthsActive = months.filter((m) => entityActiveInMonth(c, m)).length;
       const perMonth = clientMonthlyContribution(c);
-      return { name: c.name, plan: c.plan, amount: c.amount, perMonth, monthsActive, total: perMonth * monthsActive };
+      const paymentsInPeriod = state.payments
+        .filter((p) => p.client_id === c.id && p.paid_on >= startIso && p.paid_on <= endIso)
+        .sort((a, b) => b.paid_on.localeCompare(a.paid_on));
+      return {
+        name: c.name,
+        plan: c.plan,
+        amount: c.amount,
+        perMonth,
+        monthsActive,
+        paidCount: paymentsInPeriod.length,
+        lastPaidOn: paymentsInPeriod[0]?.paid_on || null,
+        next_due: c.next_due,
+        total: perMonth * monthsActive,
+      };
     })
     .filter((r) => r.total > 0)
     .sort((a, b) => b.total - a.total);
@@ -1482,7 +1494,7 @@ function buildRevenueBreakdownData(startIso, endIso) {
     .filter((p) => p.paid_on >= startIso && p.paid_on <= endIso)
     .map((p) => ({ payment: p, client: state.clients.find((c) => c.id === p.client_id) }))
     .filter((x) => x.client && x.client.plan === 'one-off')
-    .map((x) => ({ name: x.client.name, paid_on: x.payment.paid_on, amount: x.payment.amount }))
+    .map((x) => ({ name: x.client.name, paid_on: x.payment.paid_on, amount: x.payment.amount, reference: x.payment.reference }))
     .sort((a, b) => b.paid_on.localeCompare(a.paid_on));
 
   return {
@@ -1499,10 +1511,22 @@ function buildExpenseBreakdownData(startIso, endIso) {
   const recurring = state.expenses
     .filter((e) => e.plan !== 'one-off')
     .map((e) => {
-      let monthsActive = 0;
-      for (const m of months) if (entityActiveInMonth(e, m)) monthsActive++;
+      const monthsActive = months.filter((m) => entityActiveInMonth(e, m)).length;
       const perMonth = expenseMonthlyContribution(e);
-      return { name: e.name, plan: e.plan, amount: e.amount, perMonth, monthsActive, total: perMonth * monthsActive };
+      const paymentsInPeriod = state.expense_payments
+        .filter((p) => p.expense_id === e.id && p.paid_on >= startIso && p.paid_on <= endIso)
+        .sort((a, b) => b.paid_on.localeCompare(a.paid_on));
+      return {
+        name: e.name,
+        plan: e.plan,
+        amount: e.amount,
+        perMonth,
+        monthsActive,
+        paidCount: paymentsInPeriod.length,
+        lastPaidOn: paymentsInPeriod[0]?.paid_on || null,
+        next_due: e.next_due,
+        total: perMonth * monthsActive,
+      };
     })
     .filter((r) => r.total > 0)
     .sort((a, b) => b.total - a.total);
@@ -1511,7 +1535,7 @@ function buildExpenseBreakdownData(startIso, endIso) {
     .filter((p) => p.paid_on >= startIso && p.paid_on <= endIso)
     .map((p) => ({ payment: p, expense: state.expenses.find((e) => e.id === p.expense_id) }))
     .filter((x) => x.expense && x.expense.plan === 'one-off')
-    .map((x) => ({ name: x.expense.name, paid_on: x.payment.paid_on, amount: x.payment.amount }))
+    .map((x) => ({ name: x.expense.name, paid_on: x.payment.paid_on, amount: x.payment.amount, reference: x.payment.reference }))
     .sort((a, b) => b.paid_on.localeCompare(a.paid_on));
 
   return {
@@ -1523,6 +1547,20 @@ function buildExpenseBreakdownData(startIso, endIso) {
   };
 }
 
+function paymentStatusLabel(r) {
+  if (r.paidCount > 0) {
+    const datePart = fmtDate(r.lastPaidOn);
+    if (r.paidCount === 1) return `<span class="status-paid">Paid ${datePart}</span>`;
+    return `<span class="status-paid">Paid ${r.paidCount}×, latest ${datePart}</span>`;
+  }
+  if (r.next_due) {
+    const today = todayISO();
+    if (r.next_due < today) return `<span class="status-overdue">Overdue ${fmtDate(r.next_due)}</span>`;
+    return `<span class="status-expected">Due ${fmtDate(r.next_due)}</span>`;
+  }
+  return `<span class="status-expected">Expected</span>`;
+}
+
 function breakdownTableHtml(title, recurring, oneOff, recurringTotal, oneOffTotal, monthCount) {
   const showMonthsCol = monthCount > 1;
   const recurringSection = recurring.length ? `
@@ -1532,9 +1570,10 @@ function breakdownTableHtml(title, recurring, oneOff, recurringTotal, oneOffTota
         <tbody>
           ${recurring.map((r) => `
             <tr>
-              <td>${escapeHtml(r.name)}</td>
-              <td class="muted-2">${planLabel(r.plan)}${r.plan === 'quarterly' ? ` <span class="hint">${fmtKES(r.amount)}/3</span>` : ''}</td>
-              <td class="num">${fmtKES(r.perMonth)}<span class="hint">/mo</span></td>
+              <td>
+                <div>${escapeHtml(r.name)}</div>
+                <div class="row-meta">${planLabel(r.plan)}${r.plan === 'quarterly' ? ` · ${fmtKES(r.amount)}/3 = ${fmtKES(r.perMonth)}/mo` : ` · ${fmtKES(r.perMonth)}/mo`} · ${paymentStatusLabel(r)}</div>
+              </td>
               ${showMonthsCol ? `<td class="num muted-2">× ${r.monthsActive}</td>` : ''}
               <td class="num strong">${fmtKES(r.total)}</td>
             </tr>
@@ -1552,8 +1591,10 @@ function breakdownTableHtml(title, recurring, oneOff, recurringTotal, oneOffTota
         <tbody>
           ${oneOff.map((p) => `
             <tr>
-              <td>${escapeHtml(p.name)}</td>
-              <td class="muted-2 mono">${fmtDate(p.paid_on)}</td>
+              <td>
+                <div>${escapeHtml(p.name)}</div>
+                <div class="row-meta"><span class="status-paid">Paid ${fmtDate(p.paid_on)}</span>${p.reference ? ` · ref ${escapeHtml(p.reference)}` : ''}</div>
+              </td>
               <td class="num strong">${fmtKES(p.amount)}</td>
             </tr>
           `).join('')}
