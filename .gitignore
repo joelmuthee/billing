@@ -1,0 +1,13 @@
+# Local tooling
+.claude/
+.wrangler/
+.DS_Store
+Thumbs.db
+
+# Dependencies (if any get installed later)
+node_modules/
+
+# Backups / temp
+.tmp/
+*.log
+*.bak

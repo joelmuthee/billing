@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Clients Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- Login -->
+  <div id="login" class="login-wrap">
+    <div class="login-card">
+      <h1>Clients Dashboard</h1>
+      <p class="muted">Sign in to continue.</p>
+      <form id="loginForm">
+        <label>
+          <span>API base URL</span>
+          <input type="url" id="apiBase" placeholder="https://clients-dashboard-api.your.workers.dev" required>
+        </label>
+        <label>
+          <span>Password</span>
+          <input type="password" id="password" required autocomplete="current-password">
+        </label>
+        <button type="submit" class="btn-primary btn-block">Sign in</button>
+        <p id="loginError" class="error hidden"></p>
+      </form>
+    </div>
+  </div>
+
+  <!-- App -->
+  <div id="app" class="hidden">
+    <header class="header">
+      <div class="header-left">
+        <div class="logo">Clients Dashboard</div>
+        <nav class="tabs">
+          <button class="tab active" data-tab="dashboard">Dashboard</button>
+          <button class="tab" data-tab="clients">Clients</button>
+          <button class="tab" data-tab="payments">Payments</button>
+          <button class="tab" data-tab="revenue">Revenue</button>
+        </nav>
+      </div>
+      <button id="logout" class="btn-ghost">Log out</button>
+    </header>
+
+    <main class="main">
+
+      <!-- Dashboard -->
+      <section id="tab-dashboard" class="tab-panel active">
+        <div class="kpi-row" id="kpiRow"></div>
+        <div class="two-col">
+          <div class="card">
+            <div class="card-header">
+              <h2>Upcoming (next 30 days)</h2>
+            </div>
+            <div id="upcomingList"></div>
+          </div>
+          <div class="card">
+            <div class="card-header">
+              <h2>Overdue</h2>
+            </div>
+            <div id="overdueList"></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <h2>Recent payments</h2>
+          </div>
+          <div id="recentPayments"></div>
+        </div>
+      </section>
+
+      <!-- Clients -->
+      <section id="tab-clients" class="tab-panel hidden">
+        <div class="row-between">
+          <h2>All clients</h2>
+          <button class="btn-primary" id="addClientBtn">+ Add client</button>
+        </div>
+        <div class="card no-pad" id="clientsList"></div>
+      </section>
+
+      <!-- Payments -->
+      <section id="tab-payments" class="tab-panel hidden">
+        <div class="row-between">
+          <h2>Payments</h2>
+          <button class="btn-primary" id="addPaymentBtn">+ Record payment</button>
+        </div>
+        <div class="card no-pad" id="paymentsList"></div>
+      </section>
+
+      <!-- Revenue -->
+      <section id="tab-revenue" class="tab-panel hidden">
+        <div class="row-between">
+          <h2>Revenue</h2>
+          <div class="seg-control" id="revenuePeriod">
+            <button data-p="30d" class="active">30 days</button>
+            <button data-p="6mo">6 months</button>
+            <button data-p="1yr">12 months</button>
+            <button data-p="all">All time</button>
+          </div>
+        </div>
+        <div class="kpi-row" id="revenueSummary"></div>
+        <div class="card">
+          <div class="card-header">
+            <h2>Monthly revenue (last 12 months)</h2>
+          </div>
+          <div id="revenueChart"></div>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <h2>Top clients (in period)</h2>
+          </div>
+          <div id="topClients"></div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <div id="modalBackdrop" class="modal-backdrop hidden"></div>
+  <div id="modal" class="modal hidden"></div>
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

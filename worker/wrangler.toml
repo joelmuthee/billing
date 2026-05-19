@@ -1,0 +1,12 @@
+name = "clients-dashboard-api"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+account_id = "58685495706b973821d77208248c66fc"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "clients-dashboard"
+database_id = "313e644b-b6b9-41b4-ad56-6971839942ee"
+
+# Set the password via:
+#   npx wrangler secret put ADMIN_TOKEN
