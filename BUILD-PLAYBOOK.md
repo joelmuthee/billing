@@ -159,7 +159,7 @@ All require `Authorization: Bearer <ADMIN_TOKEN>` except `/api/health`.
 | DELETE | `/api/clients/:id` | Delete (cascades payments + scheduled) |
 | POST | `/api/payments` | Record payment, bumps client.next_due. Accepts optional `scheduled_payment_id` to clear a scheduled item in the same call. For one-off completion: only flips status to `completed` if no unpaid scheduled remain. Auto-sets upsell_followup_date to paid_on + 3 months if not already set. |
 | DELETE | `/api/payments/:id` | |
-| POST | `/api/scheduled-payments` | Create future scheduled payment |
+| POST | `/api/scheduled-payments` | Create future scheduled payment. Auto-reactivates a `completed` one-off client back to `active` (since scheduling more money contradicts "all paid"). Returns `{ scheduled_payment, client, reactivated }`. |
 | PUT | `/api/scheduled-payments/:id` | Update |
 | DELETE | `/api/scheduled-payments/:id` | |
 | POST | `/api/expenses` | |
@@ -209,6 +209,13 @@ Deleting a client cascades through payments and scheduled_payments. Native `conf
 ### Scheduled payments instead of recurring-with-installments
 
 A staged one-off (deposit + balance) is modelled as a one-off client plus N rows in `scheduled_payments`. Generic: works for any "I'm expecting X amount on date Y" scenario, not just deposits. One-off status only flips to `completed` when there are no unpaid scheduled items remaining.
+
+**Order-independent state.** The dashboard handles both natural workflows:
+
+- *Schedule first, then record payment.* The payment endpoint counts unpaid scheduled items at record time and keeps status `active` if any remain.
+- *Record payment first, then schedule.* The payment endpoint flips status to `completed` (no scheduled exist yet), but POST `/api/scheduled-payments` checks the target client and reactivates a `completed` one-off back to `active`. Front-end shows a toast ("BKM reactivated, balance due 06 Jul").
+
+Net result: status is correct regardless of which action the user does first. Caught the BKM Properties incident where the 40k deposit was logged before the 35k balance was scheduled, leaving the project visually "completed" with money still owed.
 
 ### Auto-suggest 3-month upsell follow-up
 
