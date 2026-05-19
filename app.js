@@ -601,7 +601,20 @@ function renderRecent() {
   }).join('');
 }
 
+function renderClientFilter() {
+  const all = state.clients.length;
+  const recurring = state.clients.filter((c) => c.plan === 'monthly' || c.plan === 'quarterly').length;
+  const oneOff = state.clients.filter((c) => c.plan === 'one-off').length;
+  const f = state.clientFilter;
+  $('#clientFilter').innerHTML = `
+    <button type="button" class="filter-pill${f === 'all' ? ' active' : ''}" data-filter="all">All <span class="filter-count">${all}</span></button>
+    <button type="button" class="filter-pill${f === 'recurring' ? ' active' : ''}" data-filter="recurring">Recurring <span class="filter-count">${recurring}</span></button>
+    <button type="button" class="filter-pill${f === 'one-off' ? ' active' : ''}" data-filter="one-off">One off <span class="filter-count">${oneOff}</span></button>
+  `;
+}
+
 function renderClientsList() {
+  renderClientFilter();
   const el = $('#clientsList');
   if (state.clients.length === 0) {
     el.innerHTML = '<div class="empty">No clients yet. Add your first one.</div>';
