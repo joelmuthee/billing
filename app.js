@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260519-17';
+const APP_VERSION = '20260519-18';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
 
 // Service catalogue, sourced from essenceautomations.com
@@ -313,6 +313,7 @@ function upcomingItems() {
       amount: c.amount,
       client: c,
       invoiceSent: c.invoice_sent_for_next_due === c.next_due,
+      invoiceDate: c.invoice_sent_for_next_due === c.next_due ? c.invoice_sent_date : null,
     });
   }
   for (const s of state.scheduled_payments) {
@@ -327,6 +328,7 @@ function upcomingItems() {
       scheduled: s,
       label: s.description || 'Scheduled payment',
       invoiceSent: !!s.invoice_sent_on,
+      invoiceDate: s.invoice_sent_on || null,
     });
   }
   return items.sort((a, b) => a.due.localeCompare(b.due));
@@ -501,21 +503,26 @@ function renderUpcoming() {
 }
 
 function invoiceBadge(it) {
-  const isKra = it.client.reminder_method === 'kra_invoice';
-  const label = isKra ? 'KRA invoice' : 'Invoice';
+  const type = it.client.invoice_type || 'regular';
+  if (type === 'none') return ''; // client doesn't need invoicing
+  const isKra = type === 'kra';
+  const noun = isKra ? 'KRA invoice' : 'Invoice';
   if (it.invoiceSent) {
-    return `<span class="badge ok">✓ ${label} raised</span>`;
+    const datePart = it.invoiceDate ? ` · ${fmtDate(it.invoiceDate)}` : '';
+    return `<span class="badge ok">✓ ${isKra ? 'KRA invoiced' : 'Invoiced'}${datePart}</span>`;
   }
-  return `<span class="badge danger">${label} needed</span>`;
+  return `<span class="badge danger">${noun} needed</span>`;
 }
 
 function invoiceToggleButton(it) {
-  const isKra = it.client.reminder_method === 'kra_invoice';
+  const type = it.client.invoice_type || 'regular';
+  if (type === 'none') return ''; // no invoicing for this client
+  const isKra = type === 'kra';
   const idArg = it.kind === 'scheduled' ? it.scheduled.id : it.client.id;
   if (it.invoiceSent) {
-    return `<button class="btn-sm" onclick="toggleInvoice('${it.kind}', ${idArg}, true)" title="Unmark invoice">↩ ${isKra ? 'KRA invoice' : 'Invoice'}</button>`;
+    return `<button class="btn-sm" onclick="toggleInvoice('${it.kind}', ${idArg}, true)" title="Undo invoiced">↩ ${isKra ? 'KRA invoice' : 'Invoice'}</button>`;
   }
-  return `<button class="btn-sm invoice-cta" onclick="toggleInvoice('${it.kind}', ${idArg}, false)">+ ${isKra ? 'Mark KRA raised' : 'Mark invoiced'}</button>`;
+  return `<button class="btn-sm invoice-cta" onclick="toggleInvoice('${it.kind}', ${idArg}, false)">+ ${isKra ? 'Mark KRA invoiced' : 'Mark invoiced'}</button>`;
 }
 
 function upcomingRowHtml(it, kind) {
@@ -645,6 +652,7 @@ function serializeClientForUpdate(c, overrides = {}) {
     services: c.services || [],
     upsell_notes: c.upsell_notes,
     upsell_followup_date: c.upsell_followup_date,
+    invoice_type: c.invoice_type || 'regular',
     ...overrides,
   };
 }
@@ -1993,6 +2001,17 @@ function clientFormHtml(c) {
           <input type="email" name="email" value="${isEdit && c.email ? escapeAttr(c.email) : ''}">
         </label>
       </div>
+      <div class="form-row">
+        <label>
+          <span>Invoice type <span class="hint">(how you bill them)</span></span>
+          <select name="invoice_type">
+            <option value="regular" ${!isEdit || (c.invoice_type || 'regular') === 'regular' ? 'selected' : ''}>Regular invoice</option>
+            <option value="kra" ${isEdit && c.invoice_type === 'kra' ? 'selected' : ''}>KRA eTIMS invoice</option>
+            <option value="none" ${isEdit && c.invoice_type === 'none' ? 'selected' : ''}>No invoice needed</option>
+          </select>
+        </label>
+        <label></label>
+      </div>
       ${isEdit ? `
         <label>
           <span>Status</span>
@@ -2051,6 +2070,7 @@ window.editClient = function (id) {
       services: fd.getAll('services'),
       upsell_notes: (fd.get('upsell_notes') || '').trim() || null,
       upsell_followup_date: fd.get('upsell_followup_date') || null,
+      invoice_type: fd.get('invoice_type') || 'regular',
     };
     try {
       if (c) await api(`/api/clients/${c.id}`, { method: 'PUT', body: JSON.stringify(body) });

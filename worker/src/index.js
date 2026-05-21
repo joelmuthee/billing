@@ -50,6 +50,7 @@ const PLANS = ["monthly", "quarterly", "one-off"];
 const STATUSES = ["active", "paused", "churned", "completed"];
 const EXPENSE_STATUSES = ["active", "paused", "cancelled", "completed"];
 const REMINDER_METHODS = ["whatsapp", "email", "kra_invoice", "none"];
+const INVOICE_TYPES = ["kra", "regular", "none"];
 
 // Advance an ISO date (YYYY-MM-DD) by N months. Returns YYYY-MM-DD.
 // Handles month-end overflow: 2026-01-31 + 1 month → 2026-02-28.
@@ -95,6 +96,9 @@ function validateClient(c) {
   }
   if (c.upsell_followup_date && !/^\d{4}-\d{2}-\d{2}$/.test(c.upsell_followup_date)) {
     return "upsell_followup_date must be YYYY-MM-DD";
+  }
+  if (c.invoice_type && !INVOICE_TYPES.includes(c.invoice_type)) {
+    return `invoice_type must be one of ${INVOICE_TYPES.join(", ")}`;
   }
   return null;
 }
@@ -195,8 +199,8 @@ export default {
       const next_due = body.next_due || (body.plan === "one-off" ? null : body.start_date);
       const status = body.status || (body.plan === "one-off" ? "active" : "active");
       const result = await env.DB.prepare(
-        `INSERT INTO clients (name, business, plan, amount, method, phone, email, notes, start_date, next_due, status, reminder_method, services, upsell_notes, upsell_followup_date)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO clients (name, business, plan, amount, method, phone, email, notes, start_date, next_due, status, reminder_method, services, upsell_notes, upsell_followup_date, invoice_type)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
         .bind(
           body.name.trim(),
@@ -213,7 +217,8 @@ export default {
           body.reminder_method || "whatsapp",
           serializeServices(body.services),
           body.upsell_notes || null,
-          body.upsell_followup_date || null
+          body.upsell_followup_date || null,
+          body.invoice_type || "regular"
         )
         .run();
       const id = result.meta.last_row_id;
@@ -232,7 +237,7 @@ export default {
           `UPDATE clients
            SET name = ?, business = ?, plan = ?, amount = ?, method = ?, phone = ?, email = ?, notes = ?,
                start_date = ?, next_due = ?, status = ?, reminder_method = ?, services = ?,
-               upsell_notes = ?, upsell_followup_date = ?
+               upsell_notes = ?, upsell_followup_date = ?, invoice_type = ?
            WHERE id = ?`
         )
           .bind(
@@ -251,6 +256,7 @@ export default {
             serializeServices(body.services),
             body.upsell_notes || null,
             body.upsell_followup_date || null,
+            body.invoice_type || "regular",
             id
           )
           .run();
@@ -341,10 +347,13 @@ export default {
       const body = await readBody(request);
       const client = await env.DB.prepare("SELECT * FROM clients WHERE id = ?").bind(id).first();
       if (!client) return json({ error: "not found" }, 404);
-      // When sent, stamp with the client's current next_due. When unsent, null.
-      const newValue = body && body.sent ? client.next_due : null;
-      await env.DB.prepare("UPDATE clients SET invoice_sent_for_next_due = ? WHERE id = ?")
-        .bind(newValue, id).run();
+      // When sent, stamp with the client's current next_due (staleness marker)
+      // and today's date (for display). When unsent, clear both.
+      const sent = body && body.sent;
+      const stale = sent ? client.next_due : null;
+      const sentDate = sent ? new Date().toISOString().slice(0, 10) : null;
+      await env.DB.prepare("UPDATE clients SET invoice_sent_for_next_due = ?, invoice_sent_date = ? WHERE id = ?")
+        .bind(stale, sentDate, id).run();
       const updated = await env.DB.prepare("SELECT * FROM clients WHERE id = ?").bind(id).first();
       return json({ client: updated });
     }

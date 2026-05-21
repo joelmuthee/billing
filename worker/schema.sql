@@ -18,7 +18,9 @@ CREATE TABLE IF NOT EXISTS clients (
   services TEXT NOT NULL DEFAULT '[]',
   upsell_notes TEXT,
   upsell_followup_date TEXT,
+  invoice_type TEXT NOT NULL DEFAULT 'regular' CHECK (invoice_type IN ('kra','regular','none')),
   invoice_sent_for_next_due TEXT,
+  invoice_sent_date TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
