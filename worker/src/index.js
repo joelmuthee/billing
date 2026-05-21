@@ -658,8 +658,13 @@ async function runOverdueDigest(env) {
     method: "POST",
     headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
     body: JSON.stringify({
-      from: "Billing <billing@essenceautomations.com>",
-      to: ["chat@essenceautomations.com"],
+      // onboarding@resend.dev is Resend's shared test sender — works with no
+      // domain verification, but can only deliver to the email the Resend
+      // account was created with. So sign up for Resend with joelmuthee@gmail.com.
+      // To send to other recipients or use a branded From, verify
+      // essenceautomations.com in Resend and switch these two lines.
+      from: "Billing <onboarding@resend.dev>",
+      to: ["joelmuthee@gmail.com"],
       subject,
       text,
     }),
