@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260519-18';
+const APP_VERSION = '20260519-19';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
 
 // Service catalogue, sourced from essenceautomations.com
@@ -565,11 +565,26 @@ function upcomingRowHtml(it, kind) {
         <div class="amount num">${fmtKES(it.amount)}</div>
         ${invoiceToggleButton(it)}
         ${reminderAction(c, kind)}
+        ${kind === 'overdue' && c.plan !== 'one-off' ? `<button class="btn-sm danger" onclick="suspendClient(${c.id})">Suspend</button>` : ''}
         <button class="btn-sm" onclick="quickPay(${c.id})">Mark paid</button>
       </div>
     </div>
   `;
 }
+
+window.suspendClient = async function (id) {
+  const c = state.clients.find((x) => x.id === id);
+  if (!c) return;
+  if (!confirm(`Suspend ${c.name}? Mark this when you've suspended their GHL subaccount for non-payment. They'll move out of the active billing list. Recording a payment later reactivates them automatically.`)) return;
+  const body = serializeClientForUpdate(c, { status: 'paused' });
+  try {
+    await api(`/api/clients/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+    await loadData();
+    toast(`${c.name} suspended`);
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+};
 
 function renderOverdue() {
   const today = todayISO();

@@ -306,6 +306,10 @@ export default {
       // Advance client.next_due (or mark one-off completed only if no unpaid scheduled remain)
       const newNextDue = bumpNextDue(client.plan, client.next_due, body.paid_on);
       let newStatus = client.status;
+      // A suspended (paused) recurring client who just paid gets reactivated.
+      if (client.plan !== "one-off" && client.status === "paused") {
+        newStatus = "active";
+      }
       if (client.plan === "one-off") {
         const remainingRs = await env.DB.prepare(
           "SELECT COUNT(*) AS n FROM scheduled_payments WHERE client_id = ? AND paid_on IS NULL"
