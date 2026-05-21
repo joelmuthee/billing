@@ -549,6 +549,121 @@ export default {
       return json({ ok: true });
     }
 
+    // Manually trigger the digest (for testing without waiting for the cron)
+    if (request.method === "POST" && path === "/api/test-digest") {
+      const result = await runOverdueDigest(env);
+      return json({ ok: true, result });
+    }
+
     return json({ error: "not found" }, 404);
   },
+
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(runOverdueDigest(env));
+  },
 };
+
+// ─────────── Daily overdue / due-soon digest (self-notification) ───────────
+
+function nairobiTodayISO() {
+  const nairobi = new Date(Date.now() + 3 * 3600 * 1000);
+  return nairobi.toISOString().slice(0, 10);
+}
+function addDaysISO_(iso, n) {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
+}
+function daysLate(today, due) {
+  const a = today.split("-").map(Number);
+  const b = due.split("-").map(Number);
+  return Math.round((Date.UTC(a[0], a[1] - 1, a[2]) - Date.UTC(b[0], b[1] - 1, b[2])) / 86400000);
+}
+function fmtKES_(n) {
+  return "Ksh " + Math.round(n || 0).toLocaleString("en-KE");
+}
+function fmtDMY(iso) {
+  const [y, m, d] = iso.split("-");
+  return `${d}/${m}/${y}`;
+}
+
+async function runOverdueDigest(env) {
+  const today = nairobiTodayISO();
+  const in3 = addDaysISO_(today, 3);
+
+  const cl = await env.DB.prepare(
+    "SELECT * FROM clients WHERE status = 'active' AND next_due IS NOT NULL ORDER BY next_due ASC"
+  ).all();
+  const clients = cl.results || [];
+  const overdue = clients.filter((c) => c.next_due < today);
+  const dueSoon = clients.filter((c) => c.next_due >= today && c.next_due <= in3);
+
+  // Unpaid scheduled payments (deposit/balance) that are overdue or due soon
+  const sp = await env.DB.prepare(
+    "SELECT s.*, c.name AS client_name FROM scheduled_payments s JOIN clients c ON c.id = s.client_id WHERE s.paid_on IS NULL ORDER BY s.due_date ASC"
+  ).all();
+  const scheduled = sp.results || [];
+  const schedOverdue = scheduled.filter((s) => s.due_date < today);
+  const schedSoon = scheduled.filter((s) => s.due_date >= today && s.due_date <= in3);
+
+  if (overdue.length === 0 && dueSoon.length === 0 && schedOverdue.length === 0 && schedSoon.length === 0) {
+    return { sent: false, reason: "nothing overdue or due soon" };
+  }
+
+  const invStatus = (c) =>
+    c.invoice_type === "none"
+      ? ""
+      : c.invoice_sent_for_next_due === c.next_due
+        ? (c.invoice_type === "kra" ? " KRA invoice raised." : " Invoice raised.")
+        : (c.invoice_type === "kra" ? " KRA invoice NOT yet raised." : " Invoice NOT yet raised.");
+
+  const lines = ["Morning Joel,", ""];
+
+  if (overdue.length || schedOverdue.length) {
+    lines.push("OVERDUE — suspend or chase:");
+    for (const c of overdue) {
+      const late = daysLate(today, c.next_due);
+      lines.push(`  - ${c.name} (${fmtKES_(c.amount)}), ${late} day${late === 1 ? "" : "s"} late, was due ${fmtDMY(c.next_due)}.${invStatus(c)}`);
+    }
+    for (const s of schedOverdue) {
+      const late = daysLate(today, s.due_date);
+      lines.push(`  - ${s.client_name} — ${s.description || "scheduled payment"} (${fmtKES_(s.amount)}), ${late} day${late === 1 ? "" : "s"} late, was due ${fmtDMY(s.due_date)}.`);
+    }
+    lines.push("");
+  }
+
+  if (dueSoon.length || schedSoon.length) {
+    lines.push("Due in the next 3 days:");
+    for (const c of dueSoon) {
+      lines.push(`  - ${c.name} (${fmtKES_(c.amount)}), due ${fmtDMY(c.next_due)}.${invStatus(c)}`);
+    }
+    for (const s of schedSoon) {
+      lines.push(`  - ${s.client_name} — ${s.description || "scheduled payment"} (${fmtKES_(s.amount)}), due ${fmtDMY(s.due_date)}.`);
+    }
+    lines.push("");
+  }
+
+  lines.push("Open the dashboard: https://billing.essenceautomations.com");
+  const text = lines.join("\n");
+
+  const subjParts = [];
+  if (overdue.length + schedOverdue.length) subjParts.push(`${overdue.length + schedOverdue.length} overdue`);
+  if (dueSoon.length + schedSoon.length) subjParts.push(`${dueSoon.length + schedSoon.length} due soon`);
+  const subject = `Billing: ${subjParts.join(", ")}`;
+
+  if (!env.RESEND_API_KEY) {
+    return { sent: false, reason: "RESEND_API_KEY not set", preview: { subject, text } };
+  }
+
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      from: "Billing <billing@essenceautomations.com>",
+      to: ["chat@essenceautomations.com"],
+      subject,
+      text,
+    }),
+  });
+  const body = await res.json().catch(() => ({}));
+  return { sent: res.ok, status: res.status, body };
+}

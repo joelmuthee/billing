@@ -8,5 +8,10 @@ binding = "DB"
 database_name = "clients-dashboard"
 database_id = "313e644b-b6b9-41b4-ad56-6971839942ee"
 
-# Set the password via:
-#   npx wrangler secret put ADMIN_TOKEN
+# Set secrets via:
+#   npx wrangler secret put ADMIN_TOKEN     -- the login password
+#   npx wrangler secret put RESEND_API_KEY  -- enables the daily overdue email digest
+
+# Daily overdue/due-soon digest at 5am UTC = 8am Nairobi
+[triggers]
+crons = ["0 5 * * *"]
