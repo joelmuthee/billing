@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260519-19';
+const APP_VERSION = '20260519-20';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
 
 // Service catalogue, sourced from essenceautomations.com
@@ -520,7 +520,7 @@ function invoiceToggleButton(it) {
   const isKra = type === 'kra';
   const idArg = it.kind === 'scheduled' ? it.scheduled.id : it.client.id;
   if (it.invoiceSent) {
-    return `<button class="btn-sm" onclick="toggleInvoice('${it.kind}', ${idArg}, true)" title="Undo invoiced">↩ ${isKra ? 'KRA invoice' : 'Invoice'}</button>`;
+    return `<button class="btn-sm" onclick="toggleInvoice('${it.kind}', ${idArg}, true)" title="Mark as not invoiced (undo)">↩ Undo</button>`;
   }
   return `<button class="btn-sm invoice-cta" onclick="toggleInvoice('${it.kind}', ${idArg}, false)">+ ${isKra ? 'Mark KRA invoiced' : 'Mark invoiced'}</button>`;
 }
