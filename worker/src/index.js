@@ -645,10 +645,29 @@ async function runOverdueDigest(env) {
   lines.push("Open the dashboard: https://billing.essenceautomations.com");
   const text = lines.join("\n");
 
-  const subjParts = [];
-  if (overdue.length + schedOverdue.length) subjParts.push(`${overdue.length + schedOverdue.length} overdue`);
-  if (dueSoon.length + schedSoon.length) subjParts.push(`${dueSoon.length + schedSoon.length} due soon`);
-  const subject = `Billing: ${subjParts.join(", ")}`;
+  // Catchy, money-led subject. Lead with the cash to collect so it stands out
+  // in a crowded inbox and answers "how much / who" at a glance.
+  const overdueItems = [...overdue, ...schedOverdue];
+  const soonItems = [...dueSoon, ...schedSoon];
+  const overdueCount = overdueItems.length;
+  const soonCount = soonItems.length;
+  const totalToCollect = [...overdueItems, ...soonItems].reduce((s, x) => s + (x.amount || 0), 0);
+
+  let subject;
+  if (overdueCount + soonCount === 1) {
+    const only = overdueItems[0] || soonItems[0];
+    const who = only.name || only.client_name;
+    const amt = fmtKES_(only.amount);
+    subject = overdueCount === 1
+      ? `⚠ ${who} hasn't paid · ${amt} to collect`
+      : `💰 ${who} due soon · ${amt}`;
+  } else {
+    const parts = [];
+    if (overdueCount) parts.push(`${overdueCount} overdue`);
+    if (soonCount) parts.push(`${soonCount} due soon`);
+    const lead = overdueCount ? "⚠" : "💰";
+    subject = `${lead} ${parts.join(", ")} · ${fmtKES_(totalToCollect)} to collect`;
+  }
 
   if (!env.RESEND_API_KEY) {
     return { sent: false, reason: "RESEND_API_KEY not set", preview: { subject, text } };
@@ -663,7 +682,7 @@ async function runOverdueDigest(env) {
       // account was created with. So sign up for Resend with joelmuthee@gmail.com.
       // To send to other recipients or use a branded From, verify
       // essenceautomations.com in Resend and switch these two lines.
-      from: "Billing <onboarding@resend.dev>",
+      from: "Essence Billing <onboarding@resend.dev>",
       to: ["joelmuthee@gmail.com"],
       subject,
       text,
