@@ -101,6 +101,38 @@ Each client has a **Reminder method** in the Add/Edit form:
 
 Templates live in `app.js` → `waReminderUrl()` and `emailDraft()`. Edit them to change tone or sign-off.
 
+## Invoice tracking (per cycle)
+
+Separate from reminder method. Each client has an **Invoice type** in the Add/Edit form:
+
+- **Regular invoice** (default) — standard invoice you email/hand over.
+- **KRA eTIMS invoice** — raised through the KRA portal. Use for OnePlumbing, Rajshyn, St. Christopher's, etc.
+- **No invoice needed** — cash/informal. No invoice badge or button shows.
+
+On every upcoming/overdue row, before payment lands you'll see a red **"Invoice needed"** / **"KRA invoice needed"** badge plus a button (**"+ Mark invoiced"** / **"+ Mark KRA invoiced"**). When you've raised the invoice, click the button — the badge flips to green **"✓ Invoiced · DD/MM/YYYY"** showing the date you raised it. When the payment lands and `next_due` bumps to the next cycle, the flag auto-resets to "needed" for the new period.
+
+A client can have WhatsApp reminders AND KRA invoicing — the two are independent fields.
+
+## Suspending a non-paying client
+
+When a client (e.g. OnePlumbing) blows past the due date and you suspend their GHL subaccount, click the red **"Suspend"** button on their overdue row. It sets status to `paused` and drops them out of the active billing list. When they finally pay, hit **"Mark paid"** from the Clients tab — recording the payment auto-reactivates them (sets status back to `active`).
+
+## Daily overdue email digest
+
+The worker runs a cron at **5am UTC = 8am Nairobi**. If anything is overdue or due in the next 3 days, it emails chat@essenceautomations.com a digest with each item's amount, days late, and invoice status. Quiet days send nothing. This is a self-notification, not client outreach.
+
+**One-time setup** (free, ~5 min) — needed because Cloudflare can't send email:
+1. Sign up at https://resend.com
+2. Add `essenceautomations.com` as a sending domain → copy the 3 DNS records into Cloudflare DNS → Verify
+3. Resend → API Keys → Create → copy
+4. `cd worker && npx wrangler secret put RESEND_API_KEY` → paste
+5. Test without waiting:
+   ```powershell
+   curl -X POST https://clients-dashboard-api.stawisystems.workers.dev/api/test-digest -H "Authorization: Bearer YOUR_PASSWORD"
+   ```
+
+Skip this and everything else still works — the cron no-ops without the key.
+
 ## In-app banner
 
 When you open the dashboard, a strip at the top of the Dashboard tab summarises "N overdue · M due this week" — amber when due-soon only, red when there's overdue. Hidden on quiet days.
@@ -110,7 +142,9 @@ When you open the dashboard, a strip at the top of the Dashboard tab summarises 
 - **Add a client**: Clients tab → "+ Add client". Plan + amount + start date are the only required fields. Next-due defaults to start date if blank.
 - **Record a payment**: Payments tab → "+ Record payment", OR click "Pay" on any client row, OR click "Mark paid" on dashboard upcoming/overdue lists. The amount auto-fills from the client. After saving, the client's `next_due` advances by one period.
 - **Mark a one-off complete**: just record the payment. Status flips to `completed` automatically.
-- **Pause a client**: Edit → status → Paused. They drop out of overdue / upcoming lists but stay in the clients list.
+- **Suspend a non-payer**: red "Suspend" button on their overdue row (recurring clients only). Recording a payment later auto-reactivates them.
+- **Pause a client by choice**: Edit → status → Paused. Same effect as suspend but you set it manually.
+- **Narrow the Upcoming list**: the Dashboard's Upcoming card has a 3 days / 7 days / 30 days toggle for how far ahead to look.
 
 ## Re-deploy after code changes
 

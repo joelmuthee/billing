@@ -41,14 +41,16 @@ Total monthly cost on free tiers: zero. No third-party services. No email send (
 ├── NOTES.md                deploy commands + day-to-day usage
 ├── BUILD-PLAYBOOK.md       this file
 └── worker/
-    ├── wrangler.toml       CF worker config (account_id, D1 binding, no cron)
+    ├── wrangler.toml       CF worker config (account_id, D1 binding, cron trigger)
     ├── schema.sql          full table layout for fresh installs
     ├── migrations/         dated, idempotent SQL files
     │   ├── 001_reminder_method.sql
     │   ├── 002_expenses.sql
     │   ├── 003_services.sql
-    │   └── 004_upsell_and_scheduled.sql
-    └── src/index.js        worker entry (auth + CRUD + bump logic)
+    │   ├── 004_upsell_and_scheduled.sql
+    │   ├── 005_invoice_tracking.sql
+    │   └── 006_invoice_type.sql
+    └── src/index.js        worker entry (auth + CRUD + bump logic + scheduled digest)
 ```
 
 ## Data model
@@ -72,10 +74,13 @@ notes TEXT
 start_date TEXT NOT NULL                                 -- ISO YYYY-MM-DD
 next_due TEXT                                            -- ISO; null after one-off completes
 status TEXT NOT NULL DEFAULT 'active'                    -- 'active' | 'paused' | 'churned' | 'completed'
-reminder_method TEXT NOT NULL DEFAULT 'whatsapp'         -- 'whatsapp' | 'email' | 'kra_invoice' | 'none'
+reminder_method TEXT NOT NULL DEFAULT 'whatsapp'         -- 'whatsapp' | 'email' | 'kra_invoice' | 'none' (how to remind the client)
 services TEXT NOT NULL DEFAULT '[]'                      -- JSON array of service slugs
 upsell_notes TEXT                                        -- free text for upsell ideas
 upsell_followup_date TEXT                                -- ISO date to remind
+invoice_type TEXT NOT NULL DEFAULT 'regular'             -- 'kra' | 'regular' | 'none' (how the client is invoiced — independent of reminder_method)
+invoice_sent_for_next_due TEXT                           -- the next_due value an invoice was raised for; matches next_due => invoice sent for this cycle. Goes stale (auto-resets) when next_due bumps.
+invoice_sent_date TEXT                                   -- the actual date the invoice was raised (for display)
 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 ```
 
@@ -106,6 +111,7 @@ due_date TEXT NOT NULL                                   -- ISO
 description TEXT                                         -- "Website balance" etc.
 paid_on TEXT                                             -- null until paid
 payment_id INTEGER                                       -- FK payments.id ON DELETE SET NULL
+invoice_sent_on TEXT                                     -- date the invoice for this scheduled payment was raised (null = not yet)
 notes TEXT
 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 ```
@@ -157,8 +163,11 @@ All require `Authorization: Bearer <ADMIN_TOKEN>` except `/api/health`.
 | POST | `/api/clients` | Create |
 | PUT | `/api/clients/:id` | Update |
 | DELETE | `/api/clients/:id` | Delete (cascades payments + scheduled) |
-| POST | `/api/payments` | Record payment, bumps client.next_due. Accepts optional `scheduled_payment_id` to clear a scheduled item in the same call. For one-off completion: only flips status to `completed` if no unpaid scheduled remain. Auto-sets upsell_followup_date to paid_on + 3 months if not already set. |
+| POST | `/api/payments` | Record payment, bumps client.next_due. Accepts optional `scheduled_payment_id` to clear a scheduled item in the same call. For one-off completion: only flips status to `completed` if no unpaid scheduled remain. Reactivates a `paused` recurring client (suspension lift). Auto-sets upsell_followup_date to paid_on + 3 months if not already set. |
 | DELETE | `/api/payments/:id` | |
+| POST | `/api/clients/:id/invoice` | Body `{ sent: bool }`. Marks/unmarks the invoice for the client's current cycle. Stamps `invoice_sent_for_next_due` (= next_due) and `invoice_sent_date` (= today). |
+| POST | `/api/scheduled-payments/:id/invoice` | Body `{ sent: bool }`. Marks/unmarks the invoice for a scheduled payment (`invoice_sent_on`). |
+| POST | `/api/test-digest` | Manually fire the overdue/due-soon email digest (for testing). No-ops with a preview if `RESEND_API_KEY` unset. |
 | POST | `/api/scheduled-payments` | Create future scheduled payment. Auto-reactivates a `completed` one-off client back to `active` (since scheduling more money contradicts "all paid"). Returns `{ scheduled_payment, client, reactivated }`. |
 | PUT | `/api/scheduled-payments/:id` | Update |
 | DELETE | `/api/scheduled-payments/:id` | |
@@ -220,6 +229,18 @@ Net result: status is correct regardless of which action the user does first. Ca
 ### Auto-suggest 3-month upsell follow-up
 
 When a one-off completes, the worker auto-sets `upsell_followup_date = paid_on + 3 months` if the user hadn't picked one. Three months out is the sweet spot for "you've used the website for a while, time to talk about adding AI Chat / Ads / CRM." Surfaces on the dashboard with Snooze 30d / Done / Edit actions.
+
+### Invoice tracking is per-cycle and decoupled from reminders
+
+`invoice_type` (kra / regular / none) says HOW a client is billed; `reminder_method` says how they're nudged. These started coupled (a `kra_invoice` reminder method) and had to be split, because a client can be WhatsApp-reminded AND KRA-invoiced (OnePlumbing, Rajshyn, St. Christopher's). Per-cycle invoice state lives in `invoice_sent_for_next_due` (a staleness marker that holds the next_due value) so it auto-resets when the cycle rolls — no manual "un-invoice" step at month start.
+
+### Suspend = paused, reactivation is automatic on payment
+
+There's no dedicated `suspended` status. Suspending a non-payer (overdue row → red "Suspend") just sets `paused`. Recording a payment for a paused recurring client flips them back to `active`. Reused the existing status rather than adding a new one — fewer states to reason about, and "suspend" vs "paused-by-choice" are operationally identical (both stop billing, both reversible).
+
+### Daily digest is a self-notification, not client outreach
+
+The cron-emailed overdue digest goes to the owner's own inbox, never to clients. This is the one place the app sends email automatically, and it's allowed precisely because it isn't client-facing — it doesn't violate the "no auto-send to clients" rule. Sends only when something is overdue or due within 3 days; quiet days are silent. Needs `RESEND_API_KEY`; no-ops cleanly without it.
 
 ### Vercel design system (Geist + shadow-as-border)
 
