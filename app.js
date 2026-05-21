@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260519-20';
+const APP_VERSION = '20260519-21';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
 
 // Service catalogue, sourced from essenceautomations.com
@@ -336,13 +336,27 @@ function upcomingItems() {
 
 window.toggleInvoice = async function (kind, id, currentlySent) {
   const sent = !currentlySent;
+  // Undoing (currentlySent === true) needs a heads-up — it resets the row to
+  // "invoice needed" and the client could mistake it for "not yet billed".
+  if (currentlySent) {
+    const c = kind === 'scheduled'
+      ? state.clients.find((x) => x.id === (state.scheduled_payments.find((s) => s.id === id) || {}).client_id)
+      : state.clients.find((x) => x.id === id);
+    const who = c ? c.name : 'this client';
+    const ok = confirm(
+      `Undo the invoice mark for ${who}?\n\n` +
+      `This does NOT cancel or recall the invoice you already raised — it only resets the dashboard flag back to "invoice needed" for this cycle. ` +
+      `Use this only if you ticked it by mistake.`
+    );
+    if (!ok) return;
+  }
   const path = kind === 'scheduled'
     ? `/api/scheduled-payments/${id}/invoice`
     : `/api/clients/${id}/invoice`;
   try {
     await api(path, { method: 'POST', body: JSON.stringify({ sent }) });
     await loadData();
-    toast(sent ? 'Invoice marked sent' : 'Invoice unmarked');
+    toast(sent ? 'Marked invoiced' : 'Invoice mark removed');
   } catch (err) {
     toast(err.message, 'error');
   }
