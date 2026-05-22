@@ -113,9 +113,14 @@ On every upcoming/overdue row, before payment lands you'll see a red **"Invoice 
 
 A client can have WhatsApp reminders AND KRA invoicing — the two are independent fields.
 
-## Suspending a non-paying client
+## Pausing a non-paying client's subaccount
 
-When a client (e.g. OnePlumbing) blows past the due date and you suspend their GHL subaccount, click the red **"Suspend"** button on their overdue row. It sets status to `paused` and drops them out of the active billing list. When they finally pay, hit **"Mark paid"** from the Clients tab — recording the payment auto-reactivates them (sets status back to `active`).
+When a client (e.g. OnePlumbing) blows past the due date and you pause their GHL subaccount, click the red **"Pause sub"** button on their overdue row. This records that their service is off — but they **stay in the Overdue list** because they still owe you. The row shows a "⏸ Subaccount paused DD/MM" badge.
+
+- **Resume sub** button turns it back on manually.
+- Recording a payment (**Mark paid**) auto-resumes them — clears the paused flag and advances next-due in one step.
+
+This is tracked by a `subaccount_paused` date field that's independent of billing `status`. Pausing the subaccount does NOT change status to `paused` — that would drop them out of the overdue list, which is the opposite of what you want for a non-payer. Use the status `Paused` (via Edit) only for clients on an intentional break who genuinely shouldn't be billed.
 
 ## Daily overdue email digest
 

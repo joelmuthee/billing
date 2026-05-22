@@ -163,7 +163,8 @@ All require `Authorization: Bearer <ADMIN_TOKEN>` except `/api/health`.
 | POST | `/api/clients` | Create |
 | PUT | `/api/clients/:id` | Update |
 | DELETE | `/api/clients/:id` | Delete (cascades payments + scheduled) |
-| POST | `/api/payments` | Record payment, bumps client.next_due. Accepts optional `scheduled_payment_id` to clear a scheduled item in the same call. For one-off completion: only flips status to `completed` if no unpaid scheduled remain. Reactivates a `paused` recurring client (suspension lift). Auto-sets upsell_followup_date to paid_on + 3 months if not already set. |
+| POST | `/api/payments` | Record payment, bumps client.next_due. Accepts optional `scheduled_payment_id` to clear a scheduled item in the same call. For one-off completion: only flips status to `completed` if no unpaid scheduled remain. Clears `subaccount_paused` (service resumes) and reactivates a `status='paused'` recurring client. Auto-sets upsell_followup_date to paid_on + 3 months if not already set. |
+| POST | `/api/clients/:id/subaccount` | Body `{ paused: bool }`. Pauses/resumes the client's GHL subaccount (`subaccount_paused` date). Independent of billing status — does not remove them from overdue. |
 | DELETE | `/api/payments/:id` | |
 | POST | `/api/clients/:id/invoice` | Body `{ sent: bool }`. Marks/unmarks the invoice for the client's current cycle. Stamps `invoice_sent_for_next_due` (= next_due) and `invoice_sent_date` (= today). |
 | POST | `/api/scheduled-payments/:id/invoice` | Body `{ sent: bool }`. Marks/unmarks the invoice for a scheduled payment (`invoice_sent_on`). |
@@ -234,9 +235,15 @@ When a one-off completes, the worker auto-sets `upsell_followup_date = paid_on +
 
 `invoice_type` (kra / regular / none) says HOW a client is billed; `reminder_method` says how they're nudged. These started coupled (a `kra_invoice` reminder method) and had to be split, because a client can be WhatsApp-reminded AND KRA-invoiced (OnePlumbing, Rajshyn, St. Christopher's). Per-cycle invoice state lives in `invoice_sent_for_next_due` (a staleness marker that holds the next_due value) so it auto-resets when the cycle rolls — no manual "un-invoice" step at month start.
 
-### Suspend = paused, reactivation is automatic on payment
+### Subaccount pause is a flag, NOT a status (corrected)
 
-There's no dedicated `suspended` status. Suspending a non-payer (overdue row → red "Suspend") just sets `paused`. Recording a payment for a paused recurring client flips them back to `active`. Reused the existing status rather than adding a new one — fewer states to reason about, and "suspend" vs "paused-by-choice" are operationally identical (both stop billing, both reversible).
+First cut made "Suspend" set `status = 'paused'`, reusing the existing state. **That was wrong** and got reverted: setting status to paused dropped the non-payer out of the overdue list (which filters on `status = 'active'`), hiding exactly the people you most need to keep chasing. They still owe you — they belong in Overdue.
+
+Fix: a separate `subaccount_paused` date field, independent of `status`. The "Pause sub" button (overdue recurring rows) stamps it; the client stays `active` so they remain in Overdue with a "⏸ Subaccount paused" badge. "Resume sub" clears it; recording a payment clears it automatically (service resumes) alongside the next_due bump.
+
+The lesson (see Obsidian): two things are only "the same state" if they behave identically in *every* view. Paused-by-choice (don't bill, hide from overdue) and paused-for-nonpayment (still owed, keep in overdue) diverge in the overdue view, so they can't share a state. `status = 'paused'` now means only the intentional-break case.
+
+Terminology: "pause" not "suspend", matching GHL.
 
 ### Daily digest is a self-notification, not client outreach
 
