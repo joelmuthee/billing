@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260519-21';
+const APP_VERSION = '20260522-22';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
 
 // Service catalogue, sourced from essenceautomations.com
@@ -570,6 +570,7 @@ function upcomingRowHtml(it, kind) {
         <div class="sub">
           <span class="badge plan-${c.plan}">${planLabel(c.plan)}</span>
           ${invoiceBadge(it)}
+          ${c.subaccount_paused ? `<span class="badge warn">⏸ Subaccount paused ${fmtDateShort(c.subaccount_paused)}</span>` : ''}
           ${kind === 'overdue'
             ? `<span class="badge danger">${Math.abs(daysFromToday(it.due))} days late</span><span>Was due ${fmtDate(it.due)}</span>`
             : `<span>Due ${fmtDate(it.due)} · ${fmtRelative(it.due)}</span>`}
@@ -579,22 +580,37 @@ function upcomingRowHtml(it, kind) {
         <div class="amount num">${fmtKES(it.amount)}</div>
         ${invoiceToggleButton(it)}
         ${reminderAction(c, kind)}
-        ${kind === 'overdue' && c.plan !== 'one-off' ? `<button class="btn-sm danger" onclick="suspendClient(${c.id})">Suspend</button>` : ''}
+        ${kind === 'overdue' && c.plan !== 'one-off'
+          ? (c.subaccount_paused
+            ? `<button class="btn-sm" onclick="resumeSubaccount(${c.id})" title="Resume their GHL subaccount">Resume sub</button>`
+            : `<button class="btn-sm danger" onclick="pauseSubaccount(${c.id})">Pause sub</button>`)
+          : ''}
         <button class="btn-sm" onclick="quickPay(${c.id})">Mark paid</button>
       </div>
     </div>
   `;
 }
 
-window.suspendClient = async function (id) {
+window.pauseSubaccount = async function (id) {
   const c = state.clients.find((x) => x.id === id);
   if (!c) return;
-  if (!confirm(`Suspend ${c.name}? Mark this when you've suspended their GHL subaccount for non-payment. They'll move out of the active billing list. Recording a payment later reactivates them automatically.`)) return;
-  const body = serializeClientForUpdate(c, { status: 'paused' });
+  if (!confirm(`Pause ${c.name}'s GHL subaccount?\n\nMark this once you've paused their subaccount in GHL for non-payment. They STAY in your overdue list (they still owe you) — this just records that their service is off. Recording a payment later resumes them automatically.`)) return;
   try {
-    await api(`/api/clients/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+    await api(`/api/clients/${id}/subaccount`, { method: 'POST', body: JSON.stringify({ paused: true }) });
     await loadData();
-    toast(`${c.name} suspended`);
+    toast(`${c.name} subaccount paused`);
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+};
+
+window.resumeSubaccount = async function (id) {
+  const c = state.clients.find((x) => x.id === id);
+  if (!c) return;
+  try {
+    await api(`/api/clients/${id}/subaccount`, { method: 'POST', body: JSON.stringify({ paused: false }) });
+    await loadData();
+    toast(`${c.name} subaccount resumed`);
   } catch (err) {
     toast(err.message, 'error');
   }

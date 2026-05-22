@@ -328,7 +328,8 @@ export default {
           }
         }
       }
-      await env.DB.prepare("UPDATE clients SET next_due = ?, status = ? WHERE id = ?")
+      // Recording a payment also resumes a paused GHL subaccount (they've paid).
+      await env.DB.prepare("UPDATE clients SET next_due = ?, status = ?, subaccount_paused = NULL WHERE id = ?")
         .bind(newNextDue, newStatus, body.client_id)
         .run();
 
@@ -359,6 +360,19 @@ export default {
       await env.DB.prepare("UPDATE clients SET invoice_sent_for_next_due = ?, invoice_sent_date = ? WHERE id = ?")
         .bind(stale, sentDate, id).run();
       const updated = await env.DB.prepare("SELECT * FROM clients WHERE id = ?").bind(id).first();
+      return json({ client: updated });
+    }
+
+    // Pause / resume a client's GHL subaccount (independent of billing status)
+    const subaccountMatch = path.match(/^\/api\/clients\/(\d+)\/subaccount$/);
+    if (subaccountMatch && request.method === "POST") {
+      const id = Number(subaccountMatch[1]);
+      const body = await readBody(request);
+      const newValue = body && body.paused ? new Date().toISOString().slice(0, 10) : null;
+      await env.DB.prepare("UPDATE clients SET subaccount_paused = ? WHERE id = ?")
+        .bind(newValue, id).run();
+      const updated = await env.DB.prepare("SELECT * FROM clients WHERE id = ?").bind(id).first();
+      if (!updated) return json({ error: "not found" }, 404);
       return json({ client: updated });
     }
 

@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS clients (
   invoice_type TEXT NOT NULL DEFAULT 'regular' CHECK (invoice_type IN ('kra','regular','none')),
   invoice_sent_for_next_due TEXT,
   invoice_sent_date TEXT,
+  subaccount_paused TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
