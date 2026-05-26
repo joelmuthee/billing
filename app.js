@@ -613,6 +613,43 @@ async function catalogSuspend(client, suspended) {
   if (!res.ok) throw new Error(`Catalog ${suspended ? 'suspend' : 'restore'} failed (HTTP ${res.status})`);
 }
 
+// Loyalty paid-feature unlock — same browser→catalog-worker path as catalogSuspend
+// (worker→worker on a same-zone *.workers.dev is blocked by CF error 1042).
+async function catalogLoyaltyUnlock(client, unlocked) {
+  if (!client || !client.catalog_api_base) return;
+  const token = await getCatalogToken();
+  const res = await fetch(`${client.catalog_api_base.replace(/\/+$/, '')}/api/loyalty-unlock`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ unlocked: !!unlocked }),
+  });
+  if (!res.ok) throw new Error(`Loyalty ${unlocked ? 'unlock' : 'lock'} failed (HTTP ${res.status})`);
+}
+
+window.unlockLoyalty = async function (id) {
+  const c = state.clients.find((x) => x.id === id);
+  if (!c || !c.catalog_api_base) return;
+  if (!confirm(`Unlock the Loyalty Program for ${c.name}?\n\nTheir shop admin switches from the locked teaser to the full Loyalty dashboard. Use this once they've paid the Ksh 5,000 one-time fee.`)) return;
+  try {
+    await catalogLoyaltyUnlock(c, true);
+    toast(`${c.name}: Loyalty Program unlocked`);
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+};
+
+window.lockLoyalty = async function (id) {
+  const c = state.clients.find((x) => x.id === id);
+  if (!c || !c.catalog_api_base) return;
+  if (!confirm(`Re-lock the Loyalty Program for ${c.name}?\n\nTheir admin goes back to the locked teaser. Only do this to correct a mistake.`)) return;
+  try {
+    await catalogLoyaltyUnlock(c, false);
+    toast(`${c.name}: Loyalty Program locked`);
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+};
+
 window.pauseSubaccount = async function (id) {
   const c = state.clients.find((x) => x.id === id);
   if (!c) return;
@@ -939,6 +976,9 @@ function renderClientsList() {
             ? (c.subaccount_paused
               ? `<button class="btn-sm" onclick="resumeSubaccount(${c.id})" title="Bring their website back online">Resume web</button>`
               : `<button class="btn-sm danger" onclick="pauseSubaccount(${c.id})" title="Take their website offline">Pause web</button>`)
+            : ''}
+          ${c.catalog_api_base
+            ? `<button class="btn-sm" onclick="unlockLoyalty(${c.id})" title="Unlock the paid Loyalty Program in their shop admin">🎁 Unlock loyalty</button><button class="btn-sm" onclick="lockLoyalty(${c.id})" title="Re-lock the Loyalty Program (correction only)">Lock</button>`
             : ''}
           <button class="btn-sm" onclick="openReminder(${c.id})">Reminder</button>
           <button class="btn-sm" onclick="editClient(${c.id})">Edit</button>
