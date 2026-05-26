@@ -12,6 +12,7 @@ console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff84
 const SERVICES_CATEGORIES = [
   { name: 'Get Found', items: [
     { value: 'websites', label: 'Website' },
+    { value: 'catalog-website', label: 'Catalogue Website' },
     { value: 'gbp-booster', label: 'GBP Booster' },
     { value: 'seo-content', label: 'SEO Content Engine' },
     { value: 'email-prospecting', label: 'Email Prospecting' },
