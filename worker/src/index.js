@@ -54,7 +54,7 @@ async function suspendCatalog(env, client, suspended) {
   try {
     await fetch(`${client.catalog_api_base.replace(/\/+$/, "")}/api/suspend`, {
       method: "POST",
-      headers: { "Authorization": `Bearer ${env.MASTER_TOKEN}`, "Content-Type": "application/json" },
+      headers: { "Authorization": `Bearer ${(env.MASTER_TOKEN || "").trim()}`, "Content-Type": "application/json" },
       body: JSON.stringify({ suspended: !!suspended }),
     });
   } catch (_) { /* non-fatal */ }
