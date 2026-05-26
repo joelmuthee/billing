@@ -593,6 +593,26 @@ function upcomingRowHtml(it, kind) {
   `;
 }
 
+// Catalog kill-switch must be called from the browser, not the worker:
+// a worker→worker fetch to a same-zone *.workers.dev returns Cloudflare error 1042.
+let _catalogToken = null;
+async function getCatalogToken() {
+  if (_catalogToken) return _catalogToken;
+  const r = await api('/api/catalog-token');
+  _catalogToken = r.token;
+  return _catalogToken;
+}
+async function catalogSuspend(client, suspended) {
+  if (!client || !client.catalog_api_base) return;
+  const token = await getCatalogToken();
+  const res = await fetch(`${client.catalog_api_base.replace(/\/+$/, '')}/api/suspend`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ suspended: !!suspended }),
+  });
+  if (!res.ok) throw new Error(`Catalog ${suspended ? 'suspend' : 'restore'} failed (HTTP ${res.status})`);
+}
+
 window.pauseSubaccount = async function (id) {
   const c = state.clients.find((x) => x.id === id);
   if (!c) return;
@@ -603,6 +623,7 @@ window.pauseSubaccount = async function (id) {
   if (!confirm(msg)) return;
   try {
     await api(`/api/clients/${id}/subaccount`, { method: 'POST', body: JSON.stringify({ paused: true }) });
+    if (isWeb) await catalogSuspend(c, true);
     await loadData();
     toast(isWeb ? `${c.name} website taken offline` : `${c.name} subaccount paused`);
   } catch (err) {
@@ -616,6 +637,7 @@ window.resumeSubaccount = async function (id) {
   const isWeb = !!c.catalog_api_base;
   try {
     await api(`/api/clients/${id}/subaccount`, { method: 'POST', body: JSON.stringify({ paused: false }) });
+    if (isWeb) await catalogSuspend(c, false);
     await loadData();
     toast(isWeb ? `${c.name} website back online` : `${c.name} subaccount resumed`);
   } catch (err) {
@@ -2300,6 +2322,11 @@ window.recordPayment = function (clientId, opts) {
     if (sId) body.scheduled_payment_id = Number(sId);
     try {
       await api('/api/payments', { method: 'POST', body: JSON.stringify(body) });
+      // A recorded payment brings a suspended catalog back online (best-effort).
+      const payClient = state.clients.find((x) => x.id === clientIdValue);
+      if (payClient && payClient.catalog_api_base && payClient.subaccount_paused) {
+        try { await catalogSuspend(payClient, false); } catch (_) { /* Resume web is the manual fallback */ }
+      }
       await loadData();
       closeModal();
       toast('Payment recorded');

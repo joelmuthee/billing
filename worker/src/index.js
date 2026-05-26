@@ -47,19 +47,6 @@ const isAuthed = (req, env) => {
 };
 
 const PLANS = ["monthly", "quarterly", "one-off"];
-// Tell a catalog worker to suspend/restore itself (billing kill-switch).
-// Non-fatal: a failed call must never break the billing action that triggered it.
-async function suspendCatalog(env, client, suspended) {
-  if (!client || !client.catalog_api_base || !env.MASTER_TOKEN) return;
-  try {
-    await fetch(`${client.catalog_api_base.replace(/\/+$/, "")}/api/suspend`, {
-      method: "POST",
-      headers: { "Authorization": `Bearer ${(env.MASTER_TOKEN || "").trim()}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ suspended: !!suspended }),
-    });
-  } catch (_) { /* non-fatal */ }
-}
-
 const STATUSES = ["active", "paused", "churned", "completed"];
 const EXPENSE_STATUSES = ["active", "paused", "cancelled", "completed"];
 const REMINDER_METHODS = ["whatsapp", "email", "kra_invoice", "none"];
@@ -180,6 +167,13 @@ export default {
     // All routes below require auth
     if (!isAuthed(request, env)) {
       return json({ error: "unauthorized" }, 401);
+    }
+
+    // The browser does the catalog suspend call directly (a worker→worker fetch to a
+    // same-zone *.workers.dev hits Cloudflare error 1042). This hands the master token
+    // to the already-authenticated billing session so the page can call /api/suspend.
+    if (request.method === "GET" && path === "/api/catalog-token") {
+      return json({ token: (env.MASTER_TOKEN || "").trim() });
     }
 
     if (request.method === "POST" && path === "/api/auth") {
@@ -350,8 +344,7 @@ export default {
 
       const payment = await env.DB.prepare("SELECT * FROM payments WHERE id = ?").bind(paymentId).first();
       const updatedClient = await env.DB.prepare("SELECT * FROM clients WHERE id = ?").bind(body.client_id).first();
-      // Kill-switch: a recorded payment restores a suspended catalog (mirrors the subaccount_paused clear above).
-      await suspendCatalog(env, updatedClient, false);
+      // The browser restores the catalog after recording a payment (worker→worker blocked by CF 1042).
       return json({ payment, client: updatedClient }, 201);
     }
 
@@ -390,8 +383,7 @@ export default {
         .bind(newValue, id).run();
       const updated = await env.DB.prepare("SELECT * FROM clients WHERE id = ?").bind(id).first();
       if (!updated) return json({ error: "not found" }, 404);
-      // Kill-switch: pausing the sub takes the catalog offline; resuming restores it.
-      await suspendCatalog(env, updated, !!(body && body.paused));
+      // The browser handles the catalog suspend call (worker→worker is blocked by CF 1042).
       return json({ client: updated });
     }
 
