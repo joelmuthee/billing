@@ -50,6 +50,7 @@ const state = {
   activeTab: 'dashboard',
   revenuePeriod: '30d',
   clientFilter: 'all',
+  clientSearch: '',
   upcomingDays: 30,
 };
 
@@ -865,13 +866,19 @@ function renderClientsList() {
     el.innerHTML = '<div class="empty">No clients yet. Add your first one.</div>';
     return;
   }
+  const q = (state.clientSearch || '').trim().toLowerCase();
   const filtered = state.clients.filter((c) => {
-    if (state.clientFilter === 'recurring') return c.plan === 'monthly' || c.plan === 'quarterly';
-    if (state.clientFilter === 'one-off') return c.plan === 'one-off';
+    if (state.clientFilter === 'recurring' && !(c.plan === 'monthly' || c.plan === 'quarterly')) return false;
+    if (state.clientFilter === 'one-off' && c.plan !== 'one-off') return false;
+    if (q && !`${c.name || ''} ${c.business || ''} ${c.phone || ''}`.toLowerCase().includes(q)) return false;
     return true;
   });
+  const countEl = $('#clientSearchCount');
+  if (countEl) countEl.textContent = q ? `${filtered.length} match${filtered.length === 1 ? '' : 'es'}` : '';
   if (filtered.length === 0) {
-    el.innerHTML = `<div class="empty">No ${state.clientFilter === 'recurring' ? 'recurring' : 'one-off'} clients yet.</div>`;
+    el.innerHTML = q
+      ? `<div class="empty">No clients match “${escapeHtml(state.clientSearch.trim())}”.</div>`
+      : `<div class="empty">No ${state.clientFilter === 'recurring' ? 'recurring' : 'one-off'} clients yet.</div>`;
     return;
   }
   const sorted = [...filtered].sort((a, b) => {
@@ -1947,6 +1954,11 @@ $('#clientFilter').addEventListener('click', (e) => {
   if (!btn) return;
   state.clientFilter = btn.dataset.filter;
   $$('#clientFilter .filter-pill').forEach((b) => b.classList.toggle('active', b === btn));
+  renderClientsList();
+});
+
+$('#clientSearch').addEventListener('input', (e) => {
+  state.clientSearch = e.target.value;
   renderClientsList();
 });
 

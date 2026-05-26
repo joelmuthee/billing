@@ -98,6 +98,11 @@
           <button class="filter-pill" data-filter="recurring">Recurring</button>
           <button class="filter-pill" data-filter="one-off">One off</button>
         </div>
+        <div style="display:flex;align-items:center;gap:10px;margin:0 0 14px;">
+          <input type="search" id="clientSearch" placeholder="Search clients by name, business or phone…" autocomplete="off"
+            style="flex:1;padding:9px 12px;border:1px solid #e5e5e5;border-radius:8px;font-size:14px;background:#fff;color:inherit;">
+          <span id="clientSearchCount" style="font-size:13px;color:#888;white-space:nowrap;"></span>
+        </div>
         <div class="card no-pad" id="clientsList"></div>
       </section>
 
@@ -162,6 +167,6 @@
   <div id="modal" class="modal hidden"></div>
   <div id="toast" class="toast hidden"></div>
 
-  <script src="app.js?v=20260522-22"></script>
+  <script src="app.js?v=20260526-1"></script>
 </body>
 </html>
