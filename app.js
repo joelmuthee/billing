@@ -571,7 +571,7 @@ function upcomingRowHtml(it, kind) {
         <div class="sub">
           <span class="badge plan-${c.plan}">${planLabel(c.plan)}</span>
           ${invoiceBadge(it)}
-          ${c.subaccount_paused ? `<span class="badge warn">⏸ Subaccount paused ${fmtDateShort(c.subaccount_paused)}</span>` : ''}
+          ${c.subaccount_paused ? `<span class="badge warn">⏸ ${c.catalog_api_base ? 'Website' : 'Subaccount'} paused ${fmtDateShort(c.subaccount_paused)}</span>` : ''}
           ${kind === 'overdue'
             ? `<span class="badge danger">${Math.abs(daysFromToday(it.due))} days late</span><span>Was due ${fmtDate(it.due)}</span>`
             : `<span>Due ${fmtDate(it.due)} · ${fmtRelative(it.due)}</span>`}
@@ -583,8 +583,8 @@ function upcomingRowHtml(it, kind) {
         ${reminderAction(c, kind)}
         ${kind === 'overdue' && c.plan !== 'one-off'
           ? (c.subaccount_paused
-            ? `<button class="btn-sm" onclick="resumeSubaccount(${c.id})" title="Resume their GHL subaccount">Resume sub</button>`
-            : `<button class="btn-sm danger" onclick="pauseSubaccount(${c.id})">Pause sub</button>`)
+            ? `<button class="btn-sm" onclick="resumeSubaccount(${c.id})" title="${c.catalog_api_base ? 'Bring their website back online' : 'Resume their GHL subaccount'}">Resume ${c.catalog_api_base ? 'web' : 'sub'}</button>`
+            : `<button class="btn-sm danger" onclick="pauseSubaccount(${c.id})" title="${c.catalog_api_base ? 'Take their website offline' : 'Pause their GHL subaccount'}">Pause ${c.catalog_api_base ? 'web' : 'sub'}</button>`)
           : ''}
         <button class="btn-sm" onclick="quickPay(${c.id})">Mark paid</button>
       </div>
