@@ -153,6 +153,30 @@ function validateExpensePayment(p) {
   return null;
 }
 
+// Generate a polite, personalized WhatsApp payment reminder via Workers AI.
+// stage: "before" (≈3 days out) | "due" (due today) | "paused" (overdue, site offline).
+async function generateReminder(env, client, stage) {
+  const amount = `Ksh ${Number(client.amount || 0).toLocaleString("en-US")}`;
+  const planWord = client.plan === "monthly" ? "monthly" : client.plan === "quarterly" ? "quarterly" : "one-off";
+  const stageCtx = {
+    before: "Their payment is due in about 3 days. This is a gentle, friendly early heads-up, nothing urgent.",
+    due: "Their payment is due today. Give a warm, polite nudge.",
+    paused: "Their payment is now overdue and, as a result, their website is temporarily paused and offline. Politely and warmly let them know the site is paused for now and will be switched back on as soon as the payment comes through. Stay kind, never harsh.",
+  }[stage] || "Their payment is coming up soon. Send a friendly reminder.";
+  const sys = "You write short, warm, professional WhatsApp payment-reminder messages for Joel of Essence Automations (a Kenyan web-design agency) to send to his clients. Rules: plain text only, no markdown, NO dashes of any kind (use commas or full stops), 2 to 4 short sentences, friendly and respectful, never aggressive or robotic. Currency is Kenyan Shillings (Ksh). Address the client by their business name naturally. End with a short sign-off from Joel, Essence Automations. Output ONLY the message text: no preamble, no surrounding quotes, no notes.";
+  const user = `Client business: ${client.business || client.name}. Service: their catalogue website. Amount due: ${amount} (${planWord} plan). Due date: ${client.next_due || "soon"}. Situation: ${stageCtx}`;
+  const r = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
+    messages: [{ role: "system", content: sys }, { role: "user", content: user }],
+    max_tokens: 240,
+  });
+  let msg = (typeof r.response === "string" ? r.response : "").trim();
+  msg = msg.replace(/^["'“”]+|["'“”]+$/g, "").trim();
+  msg = msg.replace(/^(sure[,!]?\s*)?here(?:'?s| is)[^\n:]*:\s*/i, "").trim();
+  msg = msg.replace(/[—–‒]/g, ", "); // strip em/en dashes per house style
+  if (!/essence\s*automations/i.test(msg)) msg += "\n\nJoel, Essence Automations";
+  return msg;
+}
+
 export default {
   async fetch(request, env) {
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
@@ -174,6 +198,19 @@ export default {
     // to the already-authenticated billing session so the page can call /api/suspend.
     if (request.method === "GET" && path === "/api/catalog-token") {
       return json({ token: (env.MASTER_TOKEN || "").trim() });
+    }
+
+    // AI-generated payment reminder for the copy/paste-to-WhatsApp button.
+    if (request.method === "POST" && path === "/api/reminder") {
+      const body = await readBody(request);
+      const client = await env.DB.prepare("SELECT * FROM clients WHERE id = ?").bind(body.client_id).first();
+      if (!client) return json({ error: "client not found" }, 404);
+      const stage = ["before", "due", "paused"].includes(body.stage) ? body.stage : "due";
+      try {
+        return json({ message: await generateReminder(env, client, stage), stage });
+      } catch (e) {
+        return json({ error: "AI generation failed: " + (e && e.message || e) }, 502);
+      }
     }
 
     if (request.method === "POST" && path === "/api/auth") {

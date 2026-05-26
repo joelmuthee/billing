@@ -8,6 +8,10 @@ binding = "DB"
 database_name = "clients-dashboard"
 database_id = "313e644b-b6b9-41b4-ad56-6971839942ee"
 
+# Workers AI — Llama 3.1 8B for generating payment-reminder messages. Free tier.
+[ai]
+binding = "AI"
+
 # Set secrets via:
 #   npx wrangler secret put ADMIN_TOKEN     -- the login password
 #   npx wrangler secret put RESEND_API_KEY  -- enables the daily overdue email digest

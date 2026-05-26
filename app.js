@@ -940,6 +940,7 @@ function renderClientsList() {
               ? `<button class="btn-sm" onclick="resumeSubaccount(${c.id})" title="Bring their website back online">Resume web</button>`
               : `<button class="btn-sm danger" onclick="pauseSubaccount(${c.id})" title="Take their website offline">Pause web</button>`)
             : ''}
+          <button class="btn-sm" onclick="openReminder(${c.id})">Reminder</button>
           <button class="btn-sm" onclick="editClient(${c.id})">Edit</button>
           <button class="btn-sm danger" onclick="deleteClient(${c.id})">Delete</button>
         </div>
@@ -2336,6 +2337,58 @@ window.recordPayment = function (clientId, opts) {
       errEl.classList.remove('hidden');
     }
   });
+};
+
+window.openReminder = function (id) {
+  const c = state.clients.find((x) => x.id === id);
+  if (!c) return;
+  const isCatalog = !!c.catalog_api_base;
+  const autoStage = c.subaccount_paused ? 'paused' : (c.next_due && c.next_due === todayISO() ? 'due' : 'before');
+  const pill = (val, label) => `<button type="button" class="filter-pill reminder-stage${val === autoStage ? ' active' : ''}" data-stage="${val}">${label}</button>`;
+  openModal(`
+    <h2>Payment reminder</h2>
+    <p class="muted" style="margin-bottom:12px;">For ${escapeHtml(c.name)} · ${fmtKES(c.amount)}. Pick the stage, tweak the text if you like, then copy or open WhatsApp.</p>
+    <div class="filter-pills" id="reminderStages" style="margin-bottom:12px;">
+      ${pill('before', '3 days before')}
+      ${pill('due', 'Due today')}
+      ${isCatalog ? pill('paused', 'Site paused') : ''}
+    </div>
+    <textarea id="reminderText" rows="7" style="width:100%;padding:10px 12px;border:1px solid #e5e5e5;border-radius:8px;font:inherit;resize:vertical;" placeholder="Generating…"></textarea>
+    <div class="modal-actions" style="margin-top:14px;">
+      <button type="button" class="btn-primary" id="reminderCopy">Copy</button>
+      ${c.phone ? '<button type="button" class="btn-sm" id="reminderWa">Open WhatsApp</button>' : ''}
+      <button type="button" class="btn-sm" id="reminderRegen">Regenerate</button>
+      <button type="button" class="btn-ghost" onclick="closeModal()">Close</button>
+    </div>
+  `);
+  let stage = autoStage;
+  const ta = $('#reminderText');
+  async function gen() {
+    ta.value = '';
+    ta.placeholder = 'Generating…';
+    try {
+      const r = await api('/api/reminder', { method: 'POST', body: JSON.stringify({ client_id: id, stage }) });
+      ta.value = r.message || '';
+    } catch (e) {
+      ta.placeholder = 'Could not generate: ' + e.message;
+    }
+  }
+  $$('#reminderStages .reminder-stage').forEach((b) => b.addEventListener('click', () => {
+    stage = b.dataset.stage;
+    $$('#reminderStages .reminder-stage').forEach((x) => x.classList.toggle('active', x === b));
+    gen();
+  }));
+  $('#reminderRegen').addEventListener('click', gen);
+  $('#reminderCopy').addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(ta.value); toast('Reminder copied'); }
+    catch { ta.select(); toast('Select + copy manually', 'error'); }
+  });
+  const waBtn = $('#reminderWa');
+  if (waBtn) waBtn.addEventListener('click', () => {
+    const digits = (c.phone || '').replace(/\D/g, '');
+    window.open(`https://wa.me/${digits}?text=${encodeURIComponent(ta.value)}`, '_blank', 'noopener');
+  });
+  gen();
 };
 
 window.quickPay = function (clientId) {
