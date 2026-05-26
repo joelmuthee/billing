@@ -596,11 +596,15 @@ function upcomingRowHtml(it, kind) {
 window.pauseSubaccount = async function (id) {
   const c = state.clients.find((x) => x.id === id);
   if (!c) return;
-  if (!confirm(`Pause ${c.name}'s GHL subaccount?\n\nMark this once you've paused their subaccount in GHL for non-payment. They STAY in your overdue list (they still owe you) — this just records that their service is off. Recording a payment later resumes them automatically.`)) return;
+  const isWeb = !!c.catalog_api_base;
+  const msg = isWeb
+    ? `Take ${c.name}'s website offline now?\n\nVisitors will immediately see a "temporarily offline" notice (no products, no ordering). It comes straight back when you resume it or record a payment.`
+    : `Pause ${c.name}'s GHL subaccount?\n\nMark this once you've paused their subaccount in GHL for non-payment. They STAY in your overdue list (they still owe you) — this just records that their service is off. Recording a payment later resumes them automatically.`;
+  if (!confirm(msg)) return;
   try {
     await api(`/api/clients/${id}/subaccount`, { method: 'POST', body: JSON.stringify({ paused: true }) });
     await loadData();
-    toast(`${c.name} subaccount paused`);
+    toast(isWeb ? `${c.name} website taken offline` : `${c.name} subaccount paused`);
   } catch (err) {
     toast(err.message, 'error');
   }
@@ -609,10 +613,11 @@ window.pauseSubaccount = async function (id) {
 window.resumeSubaccount = async function (id) {
   const c = state.clients.find((x) => x.id === id);
   if (!c) return;
+  const isWeb = !!c.catalog_api_base;
   try {
     await api(`/api/clients/${id}/subaccount`, { method: 'POST', body: JSON.stringify({ paused: false }) });
     await loadData();
-    toast(`${c.name} subaccount resumed`);
+    toast(isWeb ? `${c.name} website back online` : `${c.name} subaccount resumed`);
   } catch (err) {
     toast(err.message, 'error');
   }
@@ -898,6 +903,7 @@ function renderClientsList() {
             <span class="badge plan-${c.plan}">${planLabel(c.plan)}</span>
             ${c.status !== 'active' ? `<span class="badge muted">${c.status}</span>` : ''}
             ${overdue ? `<span class="badge danger">Overdue</span>` : ''}
+            ${c.subaccount_paused ? `<span class="badge warn">⏸ ${c.catalog_api_base ? 'Website offline' : 'Subaccount paused'}</span>` : ''}
             ${c.next_due ? `<span>Next due ${fmtDate(c.next_due)}</span>` : `<span>${c.plan === 'one-off' ? 'One off' : 'No due date'}</span>`}
             ${c.phone ? `<span class="mono">${escapeHtml(c.phone)}</span>` : ''}
           </div>
@@ -907,6 +913,11 @@ function renderClientsList() {
           <div class="amount num">${fmtKES(c.amount)}</div>
           <button class="btn-sm" onclick="quickPay(${c.id})">Pay</button>
           <button class="btn-sm" onclick="addScheduled(${c.id})">Schedule</button>
+          ${c.catalog_api_base
+            ? (c.subaccount_paused
+              ? `<button class="btn-sm" onclick="resumeSubaccount(${c.id})" title="Bring their website back online">Resume web</button>`
+              : `<button class="btn-sm danger" onclick="pauseSubaccount(${c.id})" title="Take their website offline">Pause web</button>`)
+            : ''}
           <button class="btn-sm" onclick="editClient(${c.id})">Edit</button>
           <button class="btn-sm danger" onclick="deleteClient(${c.id})">Delete</button>
         </div>
