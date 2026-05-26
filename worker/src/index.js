@@ -47,6 +47,19 @@ const isAuthed = (req, env) => {
 };
 
 const PLANS = ["monthly", "quarterly", "one-off"];
+// Tell a catalog worker to suspend/restore itself (billing kill-switch).
+// Non-fatal: a failed call must never break the billing action that triggered it.
+async function suspendCatalog(env, client, suspended) {
+  if (!client || !client.catalog_api_base || !env.MASTER_TOKEN) return;
+  try {
+    await fetch(`${client.catalog_api_base.replace(/\/+$/, "")}/api/suspend`, {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${env.MASTER_TOKEN}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ suspended: !!suspended }),
+    });
+  } catch (_) { /* non-fatal */ }
+}
+
 const STATUSES = ["active", "paused", "churned", "completed"];
 const EXPENSE_STATUSES = ["active", "paused", "cancelled", "completed"];
 const REMINDER_METHODS = ["whatsapp", "email", "kra_invoice", "none"];
@@ -199,8 +212,8 @@ export default {
       const next_due = body.next_due || (body.plan === "one-off" ? null : body.start_date);
       const status = body.status || (body.plan === "one-off" ? "active" : "active");
       const result = await env.DB.prepare(
-        `INSERT INTO clients (name, business, plan, amount, method, phone, email, notes, start_date, next_due, status, reminder_method, services, upsell_notes, upsell_followup_date, invoice_type)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO clients (name, business, plan, amount, method, phone, email, notes, start_date, next_due, status, reminder_method, services, upsell_notes, upsell_followup_date, invoice_type, catalog_api_base)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
         .bind(
           body.name.trim(),
@@ -218,7 +231,8 @@ export default {
           serializeServices(body.services),
           body.upsell_notes || null,
           body.upsell_followup_date || null,
-          body.invoice_type || "regular"
+          body.invoice_type || "regular",
+          body.catalog_api_base || null
         )
         .run();
       const id = result.meta.last_row_id;
@@ -237,7 +251,7 @@ export default {
           `UPDATE clients
            SET name = ?, business = ?, plan = ?, amount = ?, method = ?, phone = ?, email = ?, notes = ?,
                start_date = ?, next_due = ?, status = ?, reminder_method = ?, services = ?,
-               upsell_notes = ?, upsell_followup_date = ?, invoice_type = ?
+               upsell_notes = ?, upsell_followup_date = ?, invoice_type = ?, catalog_api_base = ?
            WHERE id = ?`
         )
           .bind(
@@ -257,6 +271,7 @@ export default {
             body.upsell_notes || null,
             body.upsell_followup_date || null,
             body.invoice_type || "regular",
+            body.catalog_api_base || null,
             id
           )
           .run();
@@ -335,6 +350,8 @@ export default {
 
       const payment = await env.DB.prepare("SELECT * FROM payments WHERE id = ?").bind(paymentId).first();
       const updatedClient = await env.DB.prepare("SELECT * FROM clients WHERE id = ?").bind(body.client_id).first();
+      // Kill-switch: a recorded payment restores a suspended catalog (mirrors the subaccount_paused clear above).
+      await suspendCatalog(env, updatedClient, false);
       return json({ payment, client: updatedClient }, 201);
     }
 
@@ -373,6 +390,8 @@ export default {
         .bind(newValue, id).run();
       const updated = await env.DB.prepare("SELECT * FROM clients WHERE id = ?").bind(id).first();
       if (!updated) return json({ error: "not found" }, 404);
+      // Kill-switch: pausing the sub takes the catalog offline; resuming restores it.
+      await suspendCatalog(env, updated, !!(body && body.paused));
       return json({ client: updated });
     }
 

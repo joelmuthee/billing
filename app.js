@@ -2055,7 +2055,10 @@ function clientFormHtml(c) {
             <option value="none" ${isEdit && c.invoice_type === 'none' ? 'selected' : ''}>No invoice needed</option>
           </select>
         </label>
-        <label></label>
+        <label>
+          <span>Catalog worker URL <span class="hint">(for the suspend kill-switch)</span></span>
+          <input type="url" name="catalog_api_base" placeholder="https://shop-api.stawisystems.workers.dev" value="${isEdit && c.catalog_api_base ? escapeAttr(c.catalog_api_base) : ''}">
+        </label>
       </div>
       ${isEdit ? `
         <label>
@@ -2116,6 +2119,7 @@ window.editClient = function (id) {
       upsell_notes: (fd.get('upsell_notes') || '').trim() || null,
       upsell_followup_date: fd.get('upsell_followup_date') || null,
       invoice_type: fd.get('invoice_type') || 'regular',
+      catalog_api_base: (fd.get('catalog_api_base') || '').trim() || null,
     };
     try {
       if (c) await api(`/api/clients/${c.id}`, { method: 'PUT', body: JSON.stringify(body) });

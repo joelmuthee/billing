@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS clients (
   invoice_sent_for_next_due TEXT,
   invoice_sent_date TEXT,
   subaccount_paused TEXT,
+  catalog_api_base TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
