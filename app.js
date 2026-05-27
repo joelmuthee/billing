@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260522-22';
+const APP_VERSION = '20260522-25';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
 
 // Service catalogue, sourced from essenceautomations.com
@@ -1622,6 +1622,21 @@ function entityActiveInMonth(entity, monthIso) {
   return entity.status === 'active' || entity.status === 'paused';
 }
 
+// Payment IDs that cleared a scheduled item. These are discrete one-off chunks
+// (website build fee, deposit, balance) and count as one-off revenue even when
+// the client is recurring — e.g. a 5k/mo catalogue client who also paid a 15k
+// one-off website build via a scheduled payment.
+function scheduledLinkedPaymentIds() {
+  return new Set(state.scheduled_payments.filter((s) => s.payment_id).map((s) => s.payment_id));
+}
+
+// Is this payment a discrete one-off chunk (vs a recurring cycle payment)?
+function isOneOffChunk(p, schedIds) {
+  const c = state.clients.find((x) => x.id === p.client_id);
+  if (!c) return false;
+  return c.plan === 'one-off' || schedIds.has(p.id);
+}
+
 function accrualRevenueForMonth(monthIso) {
   let total = 0;
   for (const c of state.clients) {
@@ -1631,11 +1646,10 @@ function accrualRevenueForMonth(monthIso) {
   }
   const monthStart = monthIso + '-01';
   const monthEnd = lastDayOfMonth(monthIso);
+  const schedIds = scheduledLinkedPaymentIds();
   for (const p of state.payments) {
-    const c = state.clients.find((x) => x.id === p.client_id);
-    if (c && c.plan === 'one-off' && p.paid_on >= monthStart && p.paid_on <= monthEnd) {
-      total += p.amount;
-    }
+    if (p.paid_on < monthStart || p.paid_on > monthEnd) continue;
+    if (isOneOffChunk(p, schedIds)) total += p.amount;
   }
   return total;
 }
@@ -1671,6 +1685,11 @@ function clientPeriodAccrual(c, startIso, endIso = todayISO()) {
     for (const m of monthsInPeriod(startIso, endIso)) {
       if (entityActiveInMonth(c, m)) total += clientMonthlyContribution(c);
     }
+    // Plus any one-off chunks this recurring client paid (e.g. a website build fee)
+    const schedIds = scheduledLinkedPaymentIds();
+    state.payments
+      .filter((p) => p.client_id === c.id && schedIds.has(p.id) && p.paid_on >= startIso && p.paid_on <= endIso)
+      .forEach((p) => { total += p.amount; });
   } else {
     state.payments
       .filter((p) => p.client_id === c.id && p.paid_on >= startIso && p.paid_on <= endIso)
@@ -1837,11 +1856,18 @@ function buildRevenueBreakdownData(startIso, endIso) {
     .filter((r) => r.total > 0)
     .sort((a, b) => b.total - a.total);
 
+  const schedIds = scheduledLinkedPaymentIds();
   const oneOff = state.payments
-    .filter((p) => p.paid_on >= startIso && p.paid_on <= endIso)
-    .map((p) => ({ payment: p, client: state.clients.find((c) => c.id === p.client_id) }))
-    .filter((x) => x.client && x.client.plan === 'one-off')
-    .map((x) => ({ name: x.client.name, paid_on: x.payment.paid_on, amount: x.payment.amount, reference: x.payment.reference }))
+    .filter((p) => p.paid_on >= startIso && p.paid_on <= endIso && isOneOffChunk(p, schedIds))
+    .map((p) => {
+      const client = state.clients.find((c) => c.id === p.client_id);
+      // For a scheduled-linked payment on a recurring client, label it with the
+      // scheduled item's description (e.g. "Website build") so it's clear it's
+      // not a recurring cycle payment.
+      const sched = state.scheduled_payments.find((s) => s.payment_id === p.id);
+      const label = sched && sched.description ? `${client.name} — ${sched.description}` : client.name;
+      return { name: label, paid_on: p.paid_on, amount: p.amount, reference: p.reference };
+    })
     .sort((a, b) => b.paid_on.localeCompare(a.paid_on));
 
   return {
