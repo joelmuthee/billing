@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260522-26';
+const APP_VERSION = '20260522-27';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
 
 // Service catalogue, sourced from essenceautomations.com
@@ -2202,7 +2202,7 @@ function clientFormHtml(c) {
             <input type="text" name="setup_fee_label" value="Website build">
           </label>
         </div>
-        <p class="hint" style="margin-top:-6px;">Adds a one-off charge due with the first payment (a scheduled payment on the start date). Mark it paid when they pay it. Skip for clients who dispute the fee.</p>
+        <p class="hint" style="margin-top:-6px; font-size:10.5px; line-height:1.4; opacity:0.85;">Adds a one-off charge due with the first payment (a scheduled payment on the start date). Mark it paid when they pay it. Skip for clients who dispute the fee.</p>
       </div>
       ` : ''}
       <div class="form-section">
