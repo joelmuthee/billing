@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260522-25';
+const APP_VERSION = '20260522-26';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
 
 // Service catalogue, sourced from essenceautomations.com
@@ -2189,6 +2189,22 @@ function clientFormHtml(c) {
         <span>Notes <span class="hint">(optional)</span></span>
         <textarea name="notes">${isEdit && c.notes ? escapeHtml(c.notes) : ''}</textarea>
       </label>
+      ${!isEdit ? `
+      <div class="form-section">
+        <div class="form-section-title">One-off setup fee (optional)</div>
+        <div class="form-row">
+          <label>
+            <span>Amount (Ksh) <span class="hint">e.g. 15,000 website build</span></span>
+            <input type="number" name="setup_fee" min="0" step="1" placeholder="Leave blank if none">
+          </label>
+          <label>
+            <span>What for?</span>
+            <input type="text" name="setup_fee_label" value="Website build">
+          </label>
+        </div>
+        <p class="hint" style="margin-top:-6px;">Adds a one-off charge due with the first payment (a scheduled payment on the start date). Mark it paid when they pay it. Skip for clients who dispute the fee.</p>
+      </div>
+      ` : ''}
       <div class="form-section">
         <div class="form-section-title">Upsell follow-up</div>
         <label>
@@ -2235,8 +2251,26 @@ window.editClient = function (id) {
       catalog_api_base: (fd.get('catalog_api_base') || '').trim() || null,
     };
     try {
-      if (c) await api(`/api/clients/${c.id}`, { method: 'PUT', body: JSON.stringify(body) });
-      else await api('/api/clients', { method: 'POST', body: JSON.stringify(body) });
+      if (c) {
+        await api(`/api/clients/${c.id}`, { method: 'PUT', body: JSON.stringify(body) });
+      } else {
+        const res = await api('/api/clients', { method: 'POST', body: JSON.stringify(body) });
+        // Optional one-off setup fee → create a scheduled payment due with the
+        // first recurring payment (the new client's next_due, which defaults to
+        // start_date). Only on create; skipped if left blank.
+        const setupFee = Number(fd.get('setup_fee')) || 0;
+        if (setupFee > 0 && res && res.client) {
+          await api('/api/scheduled-payments', {
+            method: 'POST',
+            body: JSON.stringify({
+              client_id: res.client.id,
+              amount: setupFee,
+              due_date: res.client.next_due || body.start_date,
+              description: (fd.get('setup_fee_label') || '').trim() || 'Setup fee',
+            }),
+          });
+        }
+      }
       await loadData();
       closeModal();
       toast(c ? 'Client updated' : 'Client added');
