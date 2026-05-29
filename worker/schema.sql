@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS clients (
   invoice_sent_date TEXT,
   subaccount_paused TEXT,
   catalog_api_base TEXT,
+  ended_date TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -72,6 +73,7 @@ CREATE TABLE IF NOT EXISTS expenses (
   next_due TEXT,
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','paused','cancelled','completed')),
   notes TEXT,
+  ended_date TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 

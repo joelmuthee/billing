@@ -100,6 +100,9 @@ function validateClient(c) {
   if (c.invoice_type && !INVOICE_TYPES.includes(c.invoice_type)) {
     return `invoice_type must be one of ${INVOICE_TYPES.join(", ")}`;
   }
+  if (c.ended_date && !/^\d{4}-\d{2}-\d{2}$/.test(c.ended_date)) {
+    return "ended_date must be YYYY-MM-DD";
+  }
   return null;
 }
 
@@ -243,8 +246,8 @@ export default {
       const next_due = body.next_due || (body.plan === "one-off" ? null : body.start_date);
       const status = body.status || (body.plan === "one-off" ? "active" : "active");
       const result = await env.DB.prepare(
-        `INSERT INTO clients (name, business, plan, amount, method, phone, email, notes, start_date, next_due, status, reminder_method, services, upsell_notes, upsell_followup_date, invoice_type, catalog_api_base)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO clients (name, business, plan, amount, method, phone, email, notes, start_date, next_due, status, reminder_method, services, upsell_notes, upsell_followup_date, invoice_type, catalog_api_base, ended_date)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
         .bind(
           body.name.trim(),
@@ -263,7 +266,8 @@ export default {
           body.upsell_notes || null,
           body.upsell_followup_date || null,
           body.invoice_type || "regular",
-          body.catalog_api_base || null
+          body.catalog_api_base || null,
+          body.ended_date || null
         )
         .run();
       const id = result.meta.last_row_id;
@@ -282,7 +286,7 @@ export default {
           `UPDATE clients
            SET name = ?, business = ?, plan = ?, amount = ?, method = ?, phone = ?, email = ?, notes = ?,
                start_date = ?, next_due = ?, status = ?, reminder_method = ?, services = ?,
-               upsell_notes = ?, upsell_followup_date = ?, invoice_type = ?, catalog_api_base = ?
+               upsell_notes = ?, upsell_followup_date = ?, invoice_type = ?, catalog_api_base = ?, ended_date = ?
            WHERE id = ?`
         )
           .bind(
@@ -303,6 +307,7 @@ export default {
             body.upsell_followup_date || null,
             body.invoice_type || "regular",
             body.catalog_api_base || null,
+            body.ended_date || null,
             id
           )
           .run();

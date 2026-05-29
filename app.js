@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260522-27';
+const APP_VERSION = '20260522-28';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
 
 // Service catalogue, sourced from essenceautomations.com
@@ -764,6 +764,8 @@ function serializeClientForUpdate(c, overrides = {}) {
     upsell_notes: c.upsell_notes,
     upsell_followup_date: c.upsell_followup_date,
     invoice_type: c.invoice_type || 'regular',
+    catalog_api_base: c.catalog_api_base || null,
+    ended_date: c.ended_date || null,
     ...overrides,
   };
 }
@@ -1611,12 +1613,21 @@ function expenseMonthlyContribution(e) {
   return 0;
 }
 
-// For current/future months: only `active` status counts.
-// For past months: include `active` + `paused` (we don't track when status
-// changed, so we assume past months had them on).
+// Was this client/expense billing-active during month `monthIso`?
+//   - Must have started by the end of the month.
+//   - If they have an ended_date (churned/cancelled), they count from start
+//     THROUGH the month containing ended_date, then stop — so a churned
+//     client's pre-churn months still contribute to historical accrual.
+//   - With no ended_date: current/future months need status 'active'; past
+//     months also accept 'paused' (we don't track when an open-ended pause began).
 function entityActiveInMonth(entity, monthIso) {
+  const monthStart = monthIso + '-01';
   const monthEnd = lastDayOfMonth(monthIso);
-  if (entity.start_date > monthEnd) return false;
+  if (entity.start_date > monthEnd) return false; // not started yet
+  if (entity.ended_date) {
+    // Active for any month from start through the ended_date's month.
+    return entity.ended_date >= monthStart;
+  }
   const todayMonth = todayISO().slice(0, 7);
   if (monthIso >= todayMonth) return entity.status === 'active';
   return entity.status === 'active' || entity.status === 'paused';
@@ -2174,15 +2185,21 @@ function clientFormHtml(c) {
         </label>
       </div>
       ${isEdit ? `
-        <label>
-          <span>Status</span>
-          <select name="status">
-            <option value="active" ${c.status === 'active' ? 'selected' : ''}>Active</option>
-            <option value="paused" ${c.status === 'paused' ? 'selected' : ''}>Paused</option>
-            <option value="churned" ${c.status === 'churned' ? 'selected' : ''}>Churned</option>
-            <option value="completed" ${c.status === 'completed' ? 'selected' : ''}>Completed</option>
-          </select>
-        </label>
+        <div class="form-row">
+          <label>
+            <span>Status</span>
+            <select name="status">
+              <option value="active" ${c.status === 'active' ? 'selected' : ''}>Active</option>
+              <option value="paused" ${c.status === 'paused' ? 'selected' : ''}>Paused</option>
+              <option value="churned" ${c.status === 'churned' ? 'selected' : ''}>Churned</option>
+              <option value="completed" ${c.status === 'completed' ? 'selected' : ''}>Completed</option>
+            </select>
+          </label>
+          <label>
+            <span>Ended on <span class="hint">(set when churned — keeps months up to here in revenue)</span></span>
+            <input type="date" name="ended_date" value="${c.ended_date || ''}">
+          </label>
+        </div>
       ` : ''}
       ${servicesFieldHtml(isEdit ? (c.services || []) : [])}
       <label>
@@ -2249,6 +2266,7 @@ window.editClient = function (id) {
       upsell_followup_date: fd.get('upsell_followup_date') || null,
       invoice_type: fd.get('invoice_type') || 'regular',
       catalog_api_base: (fd.get('catalog_api_base') || '').trim() || null,
+      ended_date: fd.get('ended_date') || null,
     };
     try {
       if (c) {
