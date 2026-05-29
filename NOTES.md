@@ -120,7 +120,20 @@ When a client (e.g. OnePlumbing) blows past the due date and you pause their GHL
 - **Resume sub** button turns it back on manually.
 - Recording a payment (**Mark paid**) auto-resumes them — clears the paused flag and advances next-due in one step.
 
-This is tracked by a `subaccount_paused` date field that's independent of billing `status`. Pausing the subaccount does NOT change status to `paused` — that would drop them out of the overdue list, which is the opposite of what you want for a non-payer. Use the status `Paused` (via Edit) only for clients on an intentional break who genuinely shouldn't be billed.
+This is tracked by a `subaccount_paused` date field that's independent of billing `status`. Pausing the subaccount does NOT change status to `paused` — that would drop them out of the overdue list, which is the opposite of what you want for a non-payer. Use the status `Paused` (via the row Pause button, below) only for clients on an intentional break who genuinely shouldn't be billed.
+
+## Client lifecycle: pause, churn, resume
+
+When a recurring client leaves, you don't delete them — that wipes their payment history and their contribution to past revenue. Instead:
+
+- **Pause** (row button) — a temporary break. They stay counted as a client; billing and reminders stop. Use when a client takes time off and might come back (e.g. Rajshyn pausing FB ads + GHL for June). One-click **Resume** brings them back: you pick the next due date and they're active again.
+- **Churn** (Edit → Status → Churned) — gone for good. They drop out of your active-client count, but every shilling they paid stays in your revenue history.
+
+Both set an **"Ended on"** date. That date is the accrual cut-off: the client keeps contributing to the monthly revenue trend from their start date *through the month of that date*, then stops. So your historical charts stay honest — a client who churned in May still shows in Jan–May, just not afterwards.
+
+**Set "Ended on" to their last paid month-end, not a mid-month due date.** Revenue counts in whole months, so an end date of, say, 16 June would credit June a full month on top of May — double-counting a single final payment. Use 31 May instead. The Pause modal shows a live "Revenue counts through {month}, then stops" line so you can see which month is the last one counted. (Beauttah paid once for May → ended 31 May. Rajshyn's due date was already 31 May, so for him due-date and month-end were the same.)
+
+To pause a client who's just paid: send + collect their current invoice first (so they stay on the overdue/upcoming list while you chase it), then hit Pause. Pausing clears their next due date, so doing it too early would drop them off the chase list.
 
 ## Daily overdue email digest
 
@@ -147,8 +160,9 @@ When you open the dashboard, a strip at the top of the Dashboard tab summarises 
 - **Add a client**: Clients tab → "+ Add client". Plan + amount + start date are the only required fields. Next-due defaults to start date if blank.
 - **Record a payment**: Payments tab → "+ Record payment", OR click "Pay" on any client row, OR click "Mark paid" on dashboard upcoming/overdue lists. The amount auto-fills from the client. After saving, the client's `next_due` advances by one period.
 - **Mark a one-off complete**: just record the payment. Status flips to `completed` automatically.
-- **Suspend a non-payer**: red "Suspend" button on their overdue row (recurring clients only). Recording a payment later auto-reactivates them.
-- **Pause a client by choice**: Edit → status → Paused. Same effect as suspend but you set it manually.
+- **Pause a non-payer's subaccount**: "Pause sub" button on their overdue row (catalog/GHL clients). They stay in Overdue (still owed). Recording a payment auto-resumes them. This is the kill-switch, NOT a billing pause — see the subaccount section above.
+- **Pause a client on a break**: "Pause" button on their client row. Stops billing + reminders, keeps them in your active count, one-click "Resume" later. See "Client lifecycle" below.
+- **Churn / delete a client**: both live inside **Edit** (not on the row). Churn = Status dropdown → Churned + set "Ended on". Delete = the button bottom-left of the Edit modal (type-to-confirm).
 - **Narrow the Upcoming list**: the Dashboard's Upcoming card has a 3 days / 7 days / 30 days toggle for how far ahead to look.
 
 ## Re-deploy after code changes
@@ -184,4 +198,5 @@ Drop the file into `C:\Users\Joel\Website Backups\clients-dashboard\`.
 - **Password is the bearer token.** No JWT, no rotation. If you suspect leak, run `npx wrangler secret put ADMIN_TOKEN` again to overwrite, then re-sign in everywhere.
 - **One-off completion is sticky.** Once a one-off is marked `completed` by recording a payment, recording another payment won't change status back. Edit the client to flip status manually if a one-off client comes back for round two.
 - **Deleting a payment does NOT roll back the client's `next_due` bump.** Edit the client to fix the date manually.
+- **Churn/pause keeps history via `ended_date`; don't delete a client to "stop" them.** Delete cascades their payments and erases them from past revenue. Churn (status + "Ended on") preserves all of it. Set "Ended on" to the last paid month-end so the final payment counts once, not twice.
 - **D1 free tier**: 100k reads/day, 50k writes/day. You'll never hit this for billing.

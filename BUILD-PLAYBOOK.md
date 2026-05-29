@@ -49,7 +49,9 @@ Total monthly cost on free tiers: zero. No third-party services. No email send (
     │   ├── 003_services.sql
     │   ├── 004_upsell_and_scheduled.sql
     │   ├── 005_invoice_tracking.sql
-    │   └── 006_invoice_type.sql
+    │   ├── 006_invoice_type.sql
+    │   ├── 007_subaccount_paused.sql
+    │   └── 008_ended_date.sql
     └── src/index.js        worker entry (auth + CRUD + bump logic + scheduled digest)
 ```
 
@@ -81,6 +83,9 @@ upsell_followup_date TEXT                                -- ISO date to remind
 invoice_type TEXT NOT NULL DEFAULT 'regular'             -- 'kra' | 'regular' | 'none' (how the client is invoiced — independent of reminder_method)
 invoice_sent_for_next_due TEXT                           -- the next_due value an invoice was raised for; matches next_due => invoice sent for this cycle. Goes stale (auto-resets) when next_due bumps.
 invoice_sent_date TEXT                                   -- the actual date the invoice was raised (for display)
+subaccount_paused TEXT                                   -- date the GHL subaccount / catalog site was paused for non-payment (orthogonal to status; null = live)
+catalog_api_base TEXT                                    -- catalog client's shop worker URL, for the pause-website kill switch (null for non-catalog clients)
+ended_date TEXT                                          -- date the client churned / went on a break; bounds the accrual active-window (start_date THROUGH this month, then stops). Null = still running. See "Client lifecycle" below.
 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 ```
 
@@ -133,6 +138,7 @@ start_date TEXT NOT NULL
 next_due TEXT
 status TEXT NOT NULL DEFAULT 'active'                    -- 'active' | 'paused' | 'cancelled' | 'completed'
 notes TEXT
+ended_date TEXT                                          -- date the expense was cancelled; same accrual-window role as on clients
 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 ```
 
@@ -185,7 +191,7 @@ CORS is `Access-Control-Allow-Origin: *`. The bearer token is the only real boun
 Single page, 5 tabs:
 
 1. **Dashboard** — Cash view. KPI row (this-month / outstanding / next-30d / active count split recurring vs one-off), upcoming (clients + scheduled merged) + overdue, upsell follow-ups due, recent payments. Quick-action buttons up top: "+ Record payment", "+ Add client".
-2. **Clients** — Growth KPI row (Added this month / Last 3 months / Last 12 months / All time, each click-drillable to the client list for that window). Filter pills (All / Recurring / One off with counts). Per-row actions: Pay / Schedule / Edit / Delete. Delete uses type-to-confirm.
+2. **Clients** — Growth KPI row (Added this month / Last 3 months / Last 12 months / All time, each click-drillable to the client list for that window). Filter pills (All / Recurring / One off with counts). Search box. Per-row actions: Pay / Schedule / Reminder / Pause (active) or Resume (paused/churned) / Edit. The two destructive actions live inside Edit, not on the row: **Churn** is the Status dropdown (+ "Ended on" date), **Delete** is the bottom-left button (type-to-confirm). Keeps the everyday row clean and stops accidental destructive clicks.
 3. **Payments** — Inbound payment log.
 4. **Expenses** — Recurring expenses list + recent expense payments + 3 buttons: Log payment (for recurring), + Add recurring, + Record expense (one-off shortcut that creates expense + payment in one submit).
 5. **Revenue** — Accrual view. Period selector (This month / Last month / 6 months / 12 months / All time) drives 4 KPIs (Revenue / Expenses / Net / Net monthly), a 12-month bar chart with **clickable bars** (each opens that month's revenue breakdown modal), and a top-clients-in-period list whose title shows the active period (e.g. "Top clients (May 2026)").
@@ -244,6 +250,29 @@ Fix: a separate `subaccount_paused` date field, independent of `status`. The "Pa
 The lesson (see Obsidian): two things are only "the same state" if they behave identically in *every* view. Paused-by-choice (don't bill, hide from overdue) and paused-for-nonpayment (still owed, keep in overdue) diverge in the overdue view, so they can't share a state. `status = 'paused'` now means only the intentional-break case.
 
 Terminology: "pause" not "suspend", matching GHL.
+
+### Client lifecycle: pause vs churn, and `ended_date` as the accrual boundary
+
+A recurring client leaves in two flavours, and the accrual must not lose their history either way:
+
+- **Pause** (`status='paused'`) — a temporary break, resumable. They stay in the active-client count (KPIs filter out `churned` only, not `paused`). Use for "client X is taking June off."
+- **Churn** (`status='churned'`) — gone for good. Drops out of the active-client count. Their past revenue stays.
+
+Both stop future billing (clear `next_due`) and set `ended_date`. `ended_date` is the key: `entityActiveInMonth()` treats a client as contributing to accrual from `start_date` THROUGH the month containing `ended_date`, then stops. So churning/pausing a client **keeps their pre-exit months in the revenue trend** instead of erasing them — the failure mode if you keyed accrual off live `status` alone (a churned client would vanish from every historical month).
+
+Active-window rule (`entityActiveInMonth`):
+- `start_date > month-end` → not started, skip.
+- has `ended_date` → active iff `ended_date >= month-start` (counts through the end month, ignores status).
+- no `ended_date`, current/future month → needs `status='active'`.
+- no `ended_date`, past month → `active` OR `paused` both count (we don't track when an open-ended pause began).
+
+**UI**: per-row **Pause** / **Resume** buttons run this in one click (set status + `ended_date` + clear `next_due`), with a live hint "Revenue counts through May 2026, then stops." Churn is the Status dropdown in Edit. **Resume** clears `ended_date`, sets a new `next_due`, status back to `active`.
+
+Worked examples (May 2026):
+- *Beauttah Kihara* got his own GHL account → churned. One 13k payment on 16 May. `ended_date` set to **31 May** (his last paid month-end), NOT his 16 June due date — see the gotcha below.
+- *Rajshyn Jewellers* asked to pause FB ads + GHL for June (maybe leaving) → **paused**, not churned (slight chance they return). Sequence: send/collect the May KRA invoice first (keeps them in overdue tracking), record the payment, then Pause with `ended_date=31 May`. June shows zero, they stay on the books, one-click Resume if they come back.
+
+**Subaccount-pause vs status-pause are different axes.** `subaccount_paused` (above) = "we switched their service off because they didn't pay, but keep billing them." `status='paused'` = "they're on an intentional break, don't bill them." A non-payer is `status='active'` + `subaccount_paused` set; a break-taker is `status='paused'` + `ended_date` set. Don't conflate.
 
 ### Daily digest is a self-notification, not client outreach
 
@@ -376,6 +405,7 @@ Drop into `C:\Users\Joel\Website Backups\<project-name>\`.
 - **`new Date(y, m, 1).toISOString().slice(0, 7)` shifts the month one back in any +UTC timezone.** Nairobi is UTC+3, so local midnight on the 1st of a month is the previous day in UTC, and `toISOString()` returns the previous month's YYYY-MM. Affects every bar chart key, period boundary, and `in7`/`in30` calculation if you write naive date math. Fix: build YYYY-MM keys from local `getFullYear()` + `getMonth() + 1` directly, never via `toISOString()`. For day arithmetic, use a helper that does `new Date(y, m-1, d + n)` and reads local components back — avoid the `getTime() + n * 86400000` + `toISOString()` pattern.
 - **Version badge in the corner pays for itself.** Drop an `APP_VERSION` constant in `app.js`, render it as a tiny fixed-position label bottom-right with low opacity (hovers to full). When a user reports "X is broken" but the code looks right, the first question is "what does the badge say?" — 3-second cache-vs-bug diagnosis. Worth the 10 lines.
 - **Hover affordances must match click affordances.** The 12-month bar chart hover-tinted to brand orange (because the global motion system did that to every bar), so users assumed clicking would drill in. It didn't. Two paths to resolve: either drop the hover effect (no, the motion looks good) or honor the implication by wiring an onclick. We went with onclick — bars open the month's breakdown modal. Rule: anything that hovers like a button must do something on click.
+- **`ended_date` is whole-month, so a mid-month due date double-counts the final payment.** Accrual credits a recurring client's full monthly amount to every calendar month where `ended_date >= month-start`. If you set `ended_date` to a client's *due date* and that date is mid-month (e.g. Beauttah's 16 June), the end month (June) gets a full month's credit on top of the previous month — the single final payment is counted twice. Set `ended_date` to the **last paid month-end** (31 May for Beauttah) so the one payment lands once. Only when the due date happens to fall on a month-end (Rajshyn's 31 May) is "due date" and "last paid month-end" the same value. The Pause/Resume modal shows a live "counts through {month}" hint precisely so this is visible before you commit.
 
 ## When to add a feature
 
