@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260522-28';
+const APP_VERSION = '20260529-1';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
 
 // Service catalogue, sourced from essenceautomations.com
@@ -983,6 +983,12 @@ function renderClientsList() {
             ? `<button class="btn-sm" onclick="unlockLoyalty(${c.id})" title="Unlock the paid Loyalty Program in their shop admin">🎁 Unlock loyalty</button><button class="btn-sm" onclick="lockLoyalty(${c.id})" title="Re-lock the Loyalty Program (correction only)">Lock</button>`
             : ''}
           <button class="btn-sm" onclick="openReminder(${c.id})">Reminder</button>
+          ${c.status === 'active'
+            ? `<button class="btn-sm" onclick="lifecycleClient(${c.id},'pause')" title="Stop billing for now, keep them on the books">Pause</button>
+               <button class="btn-sm danger" onclick="lifecycleClient(${c.id},'churn')" title="Mark as gone (keeps their past revenue)">Churn</button>`
+            : (c.status === 'paused' || c.status === 'churned')
+              ? `<button class="btn-sm" onclick="resumeClient(${c.id})" title="Bring them back as an active client">Resume</button>`
+              : ''}
           <button class="btn-sm" onclick="editClient(${c.id})">Edit</button>
           <button class="btn-sm danger" onclick="deleteClient(${c.id})">Delete</button>
         </div>
@@ -2347,6 +2353,100 @@ window.deleteClient = function (id) {
       btn.disabled = false;
       toast(err.message, 'error');
     }
+  });
+};
+
+// ────────── Client lifecycle: pause / churn / resume ──────────
+
+function monthLabelFromISO(yyyymm) {
+  if (!yyyymm) return '';
+  const [y, m] = yyyymm.split('-');
+  const names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${names[Number(m) - 1]} ${y}`;
+}
+
+// Pause = temporary, stays on the books, resumable. Churn = gone for good,
+// drops out of the active-client count. Both stop future billing/reminders and
+// bound revenue to the "counts through" date (start → that month, then stop).
+window.lifecycleClient = function (id, mode) {
+  const c = state.clients.find((x) => x.id === id);
+  if (!c) return;
+  const isChurn = mode === 'churn';
+  const defaultEnd = c.next_due || lastDayOfMonth(todayISO().slice(0, 7));
+  const lead = isChurn
+    ? `Marks ${escapeHtml(c.name)} as gone for good. They drop out of your active-client count and all future billing and reminders stop, but every shilling they've already paid stays in your revenue. You can still bring them back later if they return.`
+    : `Stops billing and reminders for ${escapeHtml(c.name)} for now. They stay on your books (still counted as a client) and you can resume any time. Use this for a client taking a break.`;
+  openModal(`
+    <h2${isChurn ? ' style="color: var(--red);"' : ''}>${isChurn ? 'Churn' : 'Pause'} ${escapeHtml(c.name)}?</h2>
+    <p class="muted" style="margin-bottom:14px;">${lead}</p>
+    <form id="lifecycleForm">
+      <label>
+        <span>Counts toward revenue through <span class="hint">(their last paid due date)</span></span>
+        <input type="date" name="ended_date" value="${defaultEnd}" required>
+      </label>
+      <p class="muted" id="lifecycleHint" style="font-size:13px;margin:6px 2px 14px;"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn-ghost" onclick="closeModal()">Cancel</button>
+        <button type="submit" class="${isChurn ? 'btn-danger-solid' : 'btn-primary'}">${isChurn ? 'Churn client' : 'Pause client'}</button>
+      </div>
+    </form>
+  `);
+  const dateInput = $('#lifecycleForm [name="ended_date"]');
+  const hint = $('#lifecycleHint');
+  const updateHint = () => {
+    hint.textContent = dateInput.value
+      ? `Revenue counts through ${monthLabelFromISO(dateInput.value.slice(0, 7))}, then stops.`
+      : '';
+  };
+  dateInput.addEventListener('input', updateHint);
+  updateHint();
+  $('#lifecycleForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const body = serializeClientForUpdate(c, {
+      status: isChurn ? 'churned' : 'paused',
+      ended_date: dateInput.value || defaultEnd,
+      next_due: null,
+    });
+    try {
+      await api(`/api/clients/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+      await loadData();
+      closeModal();
+      toast(`${c.name} ${isChurn ? 'churned' : 'paused'}`);
+    } catch (err) { toast(err.message, 'error'); }
+  });
+};
+
+window.resumeClient = function (id) {
+  const c = state.clients.find((x) => x.id === id);
+  if (!c) return;
+  openModal(`
+    <h2>Resume ${escapeHtml(c.name)}?</h2>
+    <p class="muted" style="margin-bottom:14px;">Brings them back as an active client. Pick the date their next bill is due. Revenue starts counting again from that month.</p>
+    <form id="resumeForm">
+      <label>
+        <span>Next due date</span>
+        <input type="date" name="next_due" value="${todayISO()}" required>
+      </label>
+      <div class="modal-actions">
+        <button type="button" class="btn-ghost" onclick="closeModal()">Cancel</button>
+        <button type="submit" class="btn-primary">Resume client</button>
+      </div>
+    </form>
+  `);
+  $('#resumeForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const nd = $('#resumeForm [name="next_due"]').value;
+    const body = serializeClientForUpdate(c, {
+      status: 'active',
+      ended_date: null,
+      next_due: nd || null,
+    });
+    try {
+      await api(`/api/clients/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+      await loadData();
+      closeModal();
+      toast(`${c.name} resumed`);
+    } catch (err) { toast(err.message, 'error'); }
   });
 };
 
