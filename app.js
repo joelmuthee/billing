@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260529-1';
+const APP_VERSION = '20260529-2';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
 
 // Service catalogue, sourced from essenceautomations.com
@@ -984,8 +984,7 @@ function renderClientsList() {
             : ''}
           <button class="btn-sm" onclick="openReminder(${c.id})">Reminder</button>
           ${c.status === 'active'
-            ? `<button class="btn-sm" onclick="lifecycleClient(${c.id},'pause')" title="Stop billing for now, keep them on the books">Pause</button>
-               <button class="btn-sm danger" onclick="lifecycleClient(${c.id},'churn')" title="Mark as gone (keeps their past revenue)">Churn</button>`
+            ? `<button class="btn-sm" onclick="lifecycleClient(${c.id},'pause')" title="Stop billing for now, keep them on the books">Pause</button>`
             : (c.status === 'paused' || c.status === 'churned')
               ? `<button class="btn-sm" onclick="resumeClient(${c.id})" title="Bring them back as an active client">Resume</button>`
               : ''}
