@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260529-3';
+const APP_VERSION = '20260529-4';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
 
 // Service catalogue, sourced from essenceautomations.com
@@ -973,7 +973,6 @@ function renderClientsList() {
         <div class="actions">
           <div class="amount num">${fmtKES(c.amount)}</div>
           <button class="btn-sm" onclick="quickPay(${c.id})">Pay</button>
-          <button class="btn-sm" onclick="addScheduled(${c.id})">Schedule</button>
           ${c.catalog_api_base
             ? (c.subaccount_paused
               ? `<button class="btn-sm" onclick="resumeSubaccount(${c.id})" title="Bring their website back online">Resume web</button>`
@@ -2239,6 +2238,7 @@ function clientFormHtml(c) {
       </div>
       <p class="error hidden" id="clientFormErr"></p>
       <div class="modal-actions">
+        ${isEdit ? `<button type="button" class="btn-sm" onclick="addScheduled(${c.id})">+ Schedule payment</button>` : ''}
         ${isEdit ? `<button type="button" class="btn-sm danger" style="margin-right:auto;" onclick="deleteClient(${c.id})">Delete client</button>` : ''}
         <button type="button" class="btn-ghost" onclick="closeModal()">Cancel</button>
         <button type="submit" class="btn-primary">${isEdit ? 'Save changes' : 'Add client'}</button>
