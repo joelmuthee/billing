@@ -24,6 +24,8 @@ CREATE TABLE IF NOT EXISTS clients (
   subaccount_paused TEXT,
   catalog_api_base TEXT,
   ended_date TEXT,
+  source TEXT,
+  source_date TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -106,6 +108,8 @@ CREATE TABLE IF NOT EXISTS prospects (
   followup_date TEXT,
   notes TEXT,
   converted_client_id INTEGER,
+  source TEXT,
+  source_date TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_prospects_stage ON prospects(stage);

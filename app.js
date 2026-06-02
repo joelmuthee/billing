@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260529-5';
+const APP_VERSION = '20260602-1';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
 
 // Service catalogue, sourced from essenceautomations.com
@@ -771,6 +771,8 @@ function serializeClientForUpdate(c, overrides = {}) {
     invoice_type: c.invoice_type || 'regular',
     catalog_api_base: c.catalog_api_base || null,
     ended_date: c.ended_date || null,
+    source: c.source || null,
+    source_date: c.source_date || null,
     ...overrides,
   };
 }
@@ -972,6 +974,7 @@ function renderClientsList() {
             ${c.subaccount_paused ? `<span class="badge warn">⏸ ${c.catalog_api_base ? 'Website offline' : 'Subaccount paused'}</span>` : ''}
             ${c.next_due ? `<span>Next due ${fmtDate(c.next_due)}</span>` : `<span>${c.plan === 'one-off' ? 'One off' : 'No due date'}</span>`}
             ${c.phone ? `<span class="mono">${escapeHtml(c.phone)}</span>` : ''}
+            ${c.source ? `<span class="badge muted">via ${escapeHtml(c.source)}</span>` : ''}
           </div>
           ${chips ? `<div class="chips">${chips}</div>` : ''}
         </div>
@@ -2120,6 +2123,24 @@ function servicesChips(services) {
     .join('');
 }
 
+// Source = how the lead was found (IG / WhatsApp / Referral / ...), plus the
+// date they first came in. Shared by the client and prospect forms.
+function sourceFieldsHtml(entity) {
+  const isEdit = !!entity;
+  return `
+    <div class="form-row">
+      <label>
+        <span>Source <span class="hint">(how you found them)</span></span>
+        <input type="text" name="source" list="sourceOptions" placeholder="Instagram, WhatsApp, Referral..." value="${isEdit && entity.source ? escapeAttr(entity.source) : ''}">
+      </label>
+      <label>
+        <span>First contact <span class="hint">(when they came in)</span></span>
+        <input type="date" name="source_date" value="${isEdit ? (entity.source_date || '') : todayISO()}">
+      </label>
+    </div>
+  `;
+}
+
 function clientFormHtml(c) {
   const isEdit = !!c;
   return `
@@ -2188,6 +2209,7 @@ function clientFormHtml(c) {
           <input type="email" name="email" value="${isEdit && c.email ? escapeAttr(c.email) : ''}">
         </label>
       </div>
+      ${sourceFieldsHtml(isEdit ? c : null)}
       <div class="form-row">
         <label>
           <span>Invoice type <span class="hint">(how you bill them)</span></span>
@@ -2268,7 +2290,7 @@ window.editClient = function (id, opts = {}) {
   // Convert-to-client and similar flows can pre-fill the add form.
   if (!c && opts.prefill) {
     const f = $('#clientForm');
-    ['name', 'business', 'phone', 'email'].forEach((k) => {
+    ['name', 'business', 'phone', 'email', 'source', 'source_date'].forEach((k) => {
       const input = f.querySelector(`[name="${k}"]`);
       if (input && opts.prefill[k]) input.value = opts.prefill[k];
     });
@@ -2295,6 +2317,8 @@ window.editClient = function (id, opts = {}) {
       invoice_type: fd.get('invoice_type') || 'regular',
       catalog_api_base: (fd.get('catalog_api_base') || '').trim() || null,
       ended_date: fd.get('ended_date') || null,
+      source: (fd.get('source') || '').trim() || null,
+      source_date: fd.get('source_date') || null,
     };
     try {
       if (c) {
@@ -2715,6 +2739,7 @@ function prospectRowHtml(p) {
           <span class="badge ${st.cls}">${st.label}</span>
           ${isOpen ? fu : ''}
           ${p.phone ? `<span class="mono">${escapeHtml(p.phone)}</span>` : ''}
+          ${p.source ? `<span class="badge muted">via ${escapeHtml(p.source)}</span>` : ''}
           ${p.demo_url ? `<a href="${escapeAttr(p.demo_url)}" target="_blank" rel="noopener" style="color:var(--brand-orange-deep);">Demo ↗</a>` : ''}
         </div>
         ${p.notes ? `<div class="sub" style="margin-top:4px;">${escapeHtml(p.notes)}</div>` : ''}
@@ -2796,6 +2821,8 @@ function serializeProspect(p, overrides = {}) {
     followup_date: p.followup_date,
     notes: p.notes,
     converted_client_id: p.converted_client_id || null,
+    source: p.source || null,
+    source_date: p.source_date || null,
     ...overrides,
   };
 }
@@ -2837,7 +2864,7 @@ window.convertProspect = function (id) {
   const p = state.prospects.find((x) => x.id === id);
   if (!p) return;
   editClient(null, {
-    prefill: { name: p.name, business: p.business, phone: p.phone, email: p.email },
+    prefill: { name: p.name, business: p.business, phone: p.phone, email: p.email, source: p.source, source_date: p.source_date },
     onCreated: async (client) => {
       await api(`/api/prospects/${id}`, {
         method: 'PUT',
@@ -2904,6 +2931,7 @@ function prospectFormHtml(p) {
           <input type="date" name="followup_date" value="${isEdit ? (p.followup_date || '') : addDaysISO(todayISO(), 3)}">
         </label>
       </div>
+      ${sourceFieldsHtml(isEdit ? p : null)}
       <label>
         <span>Notes <span class="hint">(what they want, context)</span></span>
         <textarea name="notes">${isEdit && p.notes ? escapeHtml(p.notes) : ''}</textarea>
@@ -2934,6 +2962,8 @@ window.editProspect = function (id) {
       followup_date: fd.get('followup_date') || null,
       notes: (fd.get('notes') || '').trim() || null,
       converted_client_id: p ? (p.converted_client_id || null) : null,
+      source: (fd.get('source') || '').trim() || null,
+      source_date: fd.get('source_date') || null,
     };
     try {
       if (p) await api(`/api/prospects/${p.id}`, { method: 'PUT', body: JSON.stringify(body) });

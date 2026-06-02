@@ -103,6 +103,9 @@ function validateClient(c) {
   if (c.ended_date && !/^\d{4}-\d{2}-\d{2}$/.test(c.ended_date)) {
     return "ended_date must be YYYY-MM-DD";
   }
+  if (c.source_date && !/^\d{4}-\d{2}-\d{2}$/.test(c.source_date)) {
+    return "source_date must be YYYY-MM-DD";
+  }
   return null;
 }
 
@@ -154,6 +157,7 @@ function validateProspect(p) {
   if (!p.name || typeof p.name !== "string") return "name is required";
   if (p.stage && !PROSPECT_STAGES.includes(p.stage)) return `stage must be one of ${PROSPECT_STAGES.join(", ")}`;
   if (p.followup_date && !/^\d{4}-\d{2}-\d{2}$/.test(p.followup_date)) return "followup_date must be YYYY-MM-DD";
+  if (p.source_date && !/^\d{4}-\d{2}-\d{2}$/.test(p.source_date)) return "source_date must be YYYY-MM-DD";
   return null;
 }
 
@@ -257,8 +261,8 @@ export default {
       const next_due = body.next_due || (body.plan === "one-off" ? null : body.start_date);
       const status = body.status || (body.plan === "one-off" ? "active" : "active");
       const result = await env.DB.prepare(
-        `INSERT INTO clients (name, business, plan, amount, method, phone, email, notes, start_date, next_due, status, reminder_method, services, upsell_notes, upsell_followup_date, invoice_type, catalog_api_base, ended_date)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO clients (name, business, plan, amount, method, phone, email, notes, start_date, next_due, status, reminder_method, services, upsell_notes, upsell_followup_date, invoice_type, catalog_api_base, ended_date, source, source_date)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
         .bind(
           body.name.trim(),
@@ -278,7 +282,9 @@ export default {
           body.upsell_followup_date || null,
           body.invoice_type || "regular",
           body.catalog_api_base || null,
-          body.ended_date || null
+          body.ended_date || null,
+          body.source || null,
+          body.source_date || null
         )
         .run();
       const id = result.meta.last_row_id;
@@ -297,7 +303,8 @@ export default {
           `UPDATE clients
            SET name = ?, business = ?, plan = ?, amount = ?, method = ?, phone = ?, email = ?, notes = ?,
                start_date = ?, next_due = ?, status = ?, reminder_method = ?, services = ?,
-               upsell_notes = ?, upsell_followup_date = ?, invoice_type = ?, catalog_api_base = ?, ended_date = ?
+               upsell_notes = ?, upsell_followup_date = ?, invoice_type = ?, catalog_api_base = ?, ended_date = ?,
+               source = ?, source_date = ?
            WHERE id = ?`
         )
           .bind(
@@ -319,6 +326,8 @@ export default {
             body.invoice_type || "regular",
             body.catalog_api_base || null,
             body.ended_date || null,
+            body.source || null,
+            body.source_date || null,
             id
           )
           .run();
@@ -633,8 +642,8 @@ export default {
       const err = validateProspect(body);
       if (err) return json({ error: err }, 400);
       const result = await env.DB.prepare(
-        `INSERT INTO prospects (name, business, phone, email, demo_url, stage, followup_date, notes, converted_client_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO prospects (name, business, phone, email, demo_url, stage, followup_date, notes, converted_client_id, source, source_date)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
         .bind(
           body.name.trim(),
@@ -645,7 +654,9 @@ export default {
           body.stage || "requested",
           body.followup_date || null,
           body.notes || null,
-          Number.isInteger(body.converted_client_id) ? body.converted_client_id : null
+          Number.isInteger(body.converted_client_id) ? body.converted_client_id : null,
+          body.source || null,
+          body.source_date || null
         )
         .run();
       const id = result.meta.last_row_id;
@@ -662,7 +673,7 @@ export default {
         if (err) return json({ error: err }, 400);
         await env.DB.prepare(
           `UPDATE prospects
-           SET name = ?, business = ?, phone = ?, email = ?, demo_url = ?, stage = ?, followup_date = ?, notes = ?, converted_client_id = ?
+           SET name = ?, business = ?, phone = ?, email = ?, demo_url = ?, stage = ?, followup_date = ?, notes = ?, converted_client_id = ?, source = ?, source_date = ?
            WHERE id = ?`
         )
           .bind(
@@ -675,6 +686,8 @@ export default {
             body.followup_date || null,
             body.notes || null,
             Number.isInteger(body.converted_client_id) ? body.converted_client_id : null,
+            body.source || null,
+            body.source_date || null,
             id
           )
           .run();
