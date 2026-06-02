@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260529-4';
+const APP_VERSION = '20260529-5';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
 
 // Service catalogue, sourced from essenceautomations.com
@@ -47,10 +47,12 @@ const state = {
   expenses: [],
   expense_payments: [],
   scheduled_payments: [],
+  prospects: [],
   activeTab: 'dashboard',
   revenuePeriod: '30d',
   clientFilter: 'all',
   clientSearch: '',
+  prospectFilter: 'open',
   upcomingDays: 30,
 };
 
@@ -157,6 +159,7 @@ async function loadData() {
   state.expenses = data.expenses || [];
   state.expense_payments = data.expense_payments || [];
   state.scheduled_payments = data.scheduled_payments || [];
+  state.prospects = data.prospects || [];
   renderAll();
 }
 
@@ -273,8 +276,10 @@ function renderAll() {
   renderUpcoming();
   renderOverdue();
   renderUpsellFollowups();
+  renderProspectFollowups();
   renderRecent();
   renderClientsList();
+  renderProspects();
   renderPaymentsList();
   renderExpenses();
   if (state.activeTab === 'revenue') renderRevenue();
@@ -2076,6 +2081,16 @@ $('#clientSearch').addEventListener('input', (e) => {
   renderClientsList();
 });
 
+$('#addProspectBtn').addEventListener('click', () => editProspect(null));
+
+$('#prospectFilter').addEventListener('click', (e) => {
+  const btn = e.target.closest('button');
+  if (!btn) return;
+  state.prospectFilter = btn.dataset.filter;
+  $$('#prospectFilter .filter-pill').forEach((b) => b.classList.toggle('active', b === btn));
+  renderProspects();
+});
+
 function servicesFieldHtml(selected) {
   const sel = new Set(selected || []);
   return `
@@ -2247,9 +2262,17 @@ function clientFormHtml(c) {
   `;
 }
 
-window.editClient = function (id) {
+window.editClient = function (id, opts = {}) {
   const c = id != null ? state.clients.find((x) => x.id === id) : null;
   openModal(clientFormHtml(c));
+  // Convert-to-client and similar flows can pre-fill the add form.
+  if (!c && opts.prefill) {
+    const f = $('#clientForm');
+    ['name', 'business', 'phone', 'email'].forEach((k) => {
+      const input = f.querySelector(`[name="${k}"]`);
+      if (input && opts.prefill[k]) input.value = opts.prefill[k];
+    });
+  }
   $('#clientForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
@@ -2292,6 +2315,9 @@ window.editClient = function (id) {
               description: (fd.get('setup_fee_label') || '').trim() || 'Setup fee',
             }),
           });
+        }
+        if (opts.onCreated && res && res.client) {
+          await opts.onCreated(res.client);
         }
       }
       await loadData();
@@ -2621,6 +2647,306 @@ window.deletePayment = async function (id) {
   } catch (err) {
     toast(err.message, 'error');
   }
+};
+
+// ────────── Prospects (demo pipeline) ──────────
+
+const PROSPECT_STAGE = {
+  requested: { label: 'Demo requested', cls: 'warn' },
+  demo_sent: { label: 'Demo sent', cls: 'plan-monthly' },
+  won: { label: 'Won', cls: 'ok' },
+  lost: { label: 'Lost', cls: 'muted' },
+};
+const PROSPECT_OPEN = ['requested', 'demo_sent'];
+
+function prospectMatchesFilter(p, f) {
+  if (f === 'all') return true;
+  if (f === 'open') return PROSPECT_OPEN.includes(p.stage);
+  return p.stage === f;
+}
+
+function renderProspectKPIs() {
+  const el = $('#prospectKpiRow');
+  if (!el) return;
+  const today = todayISO();
+  const open = state.prospects.filter((p) => PROSPECT_OPEN.includes(p.stage));
+  const toFollow = open.filter((p) => p.followup_date && p.followup_date <= today);
+  const requested = state.prospects.filter((p) => p.stage === 'requested').length;
+  const sent = state.prospects.filter((p) => p.stage === 'demo_sent').length;
+  const won = state.prospects.filter((p) => p.stage === 'won').length;
+  const lost = state.prospects.filter((p) => p.stage === 'lost').length;
+  el.innerHTML = `
+    <div class="kpi-card">
+      <div class="kpi-label">Open pipeline</div>
+      <div class="kpi-value">${open.length}</div>
+      <div class="kpi-sub">${requested} awaiting demo · ${sent} sent</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">To follow up</div>
+      <div class="kpi-value ${toFollow.length ? 'danger' : ''}">${toFollow.length}</div>
+      <div class="kpi-sub">due today or overdue</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Won</div>
+      <div class="kpi-value">${won}</div>
+      <div class="kpi-sub">became clients</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Lost</div>
+      <div class="kpi-value">${lost}</div>
+      <div class="kpi-sub">didn't go ahead</div>
+    </div>
+  `;
+}
+
+function prospectRowHtml(p) {
+  const today = todayISO();
+  const st = PROSPECT_STAGE[p.stage] || PROSPECT_STAGE.requested;
+  const isOpen = PROSPECT_OPEN.includes(p.stage);
+  const overdue = isOpen && p.followup_date && p.followup_date <= today;
+  const fu = p.followup_date
+    ? `<span class="badge ${overdue ? 'danger' : 'muted'}">Follow up ${fmtDateShort(p.followup_date)}${isOpen ? ` · ${fmtRelative(p.followup_date)}` : ''}</span>`
+    : '';
+  return `
+    <div class="list-row">
+      <div>
+        <div class="primary">${escapeHtml(p.name)}${p.business ? ` <span class="muted-2" style="font-weight:400;">· ${escapeHtml(p.business)}</span>` : ''}</div>
+        <div class="sub">
+          <span class="badge ${st.cls}">${st.label}</span>
+          ${isOpen ? fu : ''}
+          ${p.phone ? `<span class="mono">${escapeHtml(p.phone)}</span>` : ''}
+          ${p.demo_url ? `<a href="${escapeAttr(p.demo_url)}" target="_blank" rel="noopener" style="color:var(--brand-orange-deep);">Demo ↗</a>` : ''}
+        </div>
+        ${p.notes ? `<div class="sub" style="margin-top:4px;">${escapeHtml(p.notes)}</div>` : ''}
+      </div>
+      <div class="actions">
+        ${p.stage === 'requested' ? `<button class="btn-sm" onclick="setProspectStage(${p.id},'demo_sent')" title="Mark the demo as sent">Mark demo sent</button>` : ''}
+        ${isOpen && p.phone ? `<button class="btn-sm" onclick="prospectFollowupWA(${p.id})" title="Open WhatsApp with a follow-up draft">Follow up</button>` : ''}
+        ${isOpen ? `<button class="btn-sm" onclick="convertProspect(${p.id})" title="They committed, create their client record">Won → client</button>` : ''}
+        ${isOpen ? `<button class="btn-sm danger" onclick="setProspectStage(${p.id},'lost')" title="They didn't go ahead">Lost</button>` : ''}
+        ${!isOpen ? `<button class="btn-sm" onclick="reopenProspect(${p.id})" title="Move back to the open pipeline">Reopen</button>` : ''}
+        <button class="btn-sm" onclick="editProspect(${p.id})">Edit</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderProspects() {
+  renderProspectKPIs();
+  const el = $('#prospectsList');
+  if (!el) return;
+  const f = state.prospectFilter;
+  const list = state.prospects.filter((p) => prospectMatchesFilter(p, f));
+  list.sort((a, b) => {
+    const ao = PROSPECT_OPEN.includes(a.stage);
+    const bo = PROSPECT_OPEN.includes(b.stage);
+    if (ao !== bo) return ao ? -1 : 1;
+    const af = a.followup_date || '9999-99-99';
+    const bf = b.followup_date || '9999-99-99';
+    if (ao && af !== bf) return af < bf ? -1 : 1;
+    return (b.created_at || '').localeCompare(a.created_at || '');
+  });
+  if (list.length === 0) {
+    const label = f === 'all' ? 'prospects' : f === 'open' ? 'open prospects' : `prospects in "${(PROSPECT_STAGE[f] || {}).label || f}"`;
+    el.innerHTML = `<div class="empty">No ${label} yet.</div>`;
+    return;
+  }
+  el.innerHTML = list.map(prospectRowHtml).join('');
+}
+
+function renderProspectFollowups() {
+  const card = $('#prospectFollowupCard');
+  const el = $('#prospectFollowupList');
+  if (!card || !el) return;
+  const today = todayISO();
+  const due = state.prospects
+    .filter((p) => PROSPECT_OPEN.includes(p.stage) && p.followup_date && p.followup_date <= today)
+    .sort((a, b) => (a.followup_date < b.followup_date ? -1 : 1));
+  if (due.length === 0) { card.hidden = true; return; }
+  card.hidden = false;
+  el.innerHTML = due.map((p) => {
+    const st = PROSPECT_STAGE[p.stage] || PROSPECT_STAGE.requested;
+    return `
+    <div class="list-row">
+      <div>
+        <div class="primary">${escapeHtml(p.name)}${p.business ? ` <span class="muted-2" style="font-weight:400;">· ${escapeHtml(p.business)}</span>` : ''}</div>
+        <div class="sub">
+          <span class="badge ${st.cls}">${st.label}</span>
+          <span class="badge danger">Follow up ${fmtDateShort(p.followup_date)} · ${fmtRelative(p.followup_date)}</span>
+          ${p.phone ? `<span class="mono">${escapeHtml(p.phone)}</span>` : ''}
+        </div>
+      </div>
+      <div class="actions">
+        ${p.phone ? `<button class="btn-sm" onclick="prospectFollowupWA(${p.id})">Follow up</button>` : ''}
+        <button class="btn-sm" onclick="snoozeProspect(${p.id})">Snooze 3d</button>
+        <button class="btn-sm" onclick="editProspect(${p.id})">Edit</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function serializeProspect(p, overrides = {}) {
+  return {
+    name: p.name,
+    business: p.business,
+    phone: p.phone,
+    email: p.email,
+    demo_url: p.demo_url,
+    stage: p.stage,
+    followup_date: p.followup_date,
+    notes: p.notes,
+    converted_client_id: p.converted_client_id || null,
+    ...overrides,
+  };
+}
+
+window.setProspectStage = async function (id, stage) {
+  const p = state.prospects.find((x) => x.id === id);
+  if (!p) return;
+  try {
+    await api(`/api/prospects/${id}`, { method: 'PUT', body: JSON.stringify(serializeProspect(p, { stage })) });
+    await loadData();
+    toast(`Marked ${(PROSPECT_STAGE[stage] || {}).label || stage}`);
+  } catch (err) { toast(err.message, 'error'); }
+};
+
+window.reopenProspect = function (id) {
+  setProspectStage(id, 'demo_sent');
+};
+
+window.snoozeProspect = async function (id) {
+  const p = state.prospects.find((x) => x.id === id);
+  if (!p) return;
+  try {
+    await api(`/api/prospects/${id}`, { method: 'PUT', body: JSON.stringify(serializeProspect(p, { followup_date: addDaysISO(todayISO(), 3) })) });
+    await loadData();
+    toast('Snoozed 3 days');
+  } catch (err) { toast(err.message, 'error'); }
+};
+
+window.prospectFollowupWA = function (id) {
+  const p = state.prospects.find((x) => x.id === id);
+  if (!p || !p.phone) return;
+  const digits = (p.phone || '').replace(/\D/g, '');
+  const biz = p.business ? ` for ${p.business}` : '';
+  const msg = `Hi ${p.name}, following up on the demo I put together${biz}. Happy to walk you through it whenever suits you, no rush. Let me know your thoughts.\n\nJoel, Essence Automations`;
+  window.open(`https://wa.me/${digits}?text=${encodeURIComponent(msg)}`, '_blank', 'noopener');
+};
+
+window.convertProspect = function (id) {
+  const p = state.prospects.find((x) => x.id === id);
+  if (!p) return;
+  editClient(null, {
+    prefill: { name: p.name, business: p.business, phone: p.phone, email: p.email },
+    onCreated: async (client) => {
+      await api(`/api/prospects/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(serializeProspect(p, { stage: 'won', converted_client_id: client.id })),
+      });
+    },
+  });
+};
+
+window.deleteProspect = async function (id) {
+  const p = state.prospects.find((x) => x.id === id);
+  if (!p) return;
+  if (!confirm(`Delete prospect "${p.name}"? This can't be undone.`)) return;
+  try {
+    await api(`/api/prospects/${id}`, { method: 'DELETE' });
+    await loadData();
+    closeModal();
+    toast('Prospect deleted');
+  } catch (err) { toast(err.message, 'error'); }
+};
+
+function prospectFormHtml(p) {
+  const isEdit = !!p;
+  const stageOpt = (val, label) => `<option value="${val}" ${(isEdit ? p.stage : 'requested') === val ? 'selected' : ''}>${label}</option>`;
+  return `
+    <h2>${isEdit ? 'Edit prospect' : 'Add prospect'}</h2>
+    <form id="prospectForm">
+      <label>
+        <span>Name</span>
+        <input type="text" name="name" required value="${isEdit ? escapeAttr(p.name) : ''}" autofocus>
+      </label>
+      <div class="form-row">
+        <label>
+          <span>Business <span class="hint">(optional)</span></span>
+          <input type="text" name="business" value="${isEdit && p.business ? escapeAttr(p.business) : ''}">
+        </label>
+        <label>
+          <span>Phone <span class="hint">(for WhatsApp)</span></span>
+          <input type="text" name="phone" value="${isEdit && p.phone ? escapeAttr(p.phone) : ''}">
+        </label>
+      </div>
+      <div class="form-row">
+        <label>
+          <span>Email <span class="hint">(optional)</span></span>
+          <input type="email" name="email" value="${isEdit && p.email ? escapeAttr(p.email) : ''}">
+        </label>
+        <label>
+          <span>Stage</span>
+          <select name="stage">
+            ${stageOpt('requested', 'Demo requested')}
+            ${stageOpt('demo_sent', 'Demo sent')}
+            ${stageOpt('won', 'Won')}
+            ${stageOpt('lost', 'Lost')}
+          </select>
+        </label>
+      </div>
+      <div class="form-row">
+        <label>
+          <span>Demo link <span class="hint">(optional)</span></span>
+          <input type="url" name="demo_url" placeholder="https://..." value="${isEdit && p.demo_url ? escapeAttr(p.demo_url) : ''}">
+        </label>
+        <label>
+          <span>Follow up on <span class="hint">(so it doesn't slip)</span></span>
+          <input type="date" name="followup_date" value="${isEdit ? (p.followup_date || '') : addDaysISO(todayISO(), 3)}">
+        </label>
+      </div>
+      <label>
+        <span>Notes <span class="hint">(what they want, context)</span></span>
+        <textarea name="notes">${isEdit && p.notes ? escapeHtml(p.notes) : ''}</textarea>
+      </label>
+      <p class="error hidden" id="prospectFormErr"></p>
+      <div class="modal-actions">
+        ${isEdit ? `<button type="button" class="btn-sm danger" style="margin-right:auto;" onclick="deleteProspect(${p.id})">Delete</button>` : ''}
+        <button type="button" class="btn-ghost" onclick="closeModal()">Cancel</button>
+        <button type="submit" class="btn-primary">${isEdit ? 'Save changes' : 'Add prospect'}</button>
+      </div>
+    </form>
+  `;
+}
+
+window.editProspect = function (id) {
+  const p = id != null ? state.prospects.find((x) => x.id === id) : null;
+  openModal(prospectFormHtml(p));
+  $('#prospectForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const body = {
+      name: fd.get('name').trim(),
+      business: (fd.get('business') || '').trim() || null,
+      phone: (fd.get('phone') || '').trim() || null,
+      email: (fd.get('email') || '').trim() || null,
+      demo_url: (fd.get('demo_url') || '').trim() || null,
+      stage: fd.get('stage') || 'requested',
+      followup_date: fd.get('followup_date') || null,
+      notes: (fd.get('notes') || '').trim() || null,
+      converted_client_id: p ? (p.converted_client_id || null) : null,
+    };
+    try {
+      if (p) await api(`/api/prospects/${p.id}`, { method: 'PUT', body: JSON.stringify(body) });
+      else await api('/api/prospects', { method: 'POST', body: JSON.stringify(body) });
+      await loadData();
+      closeModal();
+      toast(p ? 'Prospect updated' : 'Prospect added');
+    } catch (err) {
+      const errEl = $('#prospectFormErr');
+      errEl.textContent = err.message;
+      errEl.classList.remove('hidden');
+    }
+  });
 };
 
 // ────────── HTML escape ──────────

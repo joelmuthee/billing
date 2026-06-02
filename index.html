@@ -33,6 +33,7 @@
     <header class="header">
       <nav class="tabs">
         <button class="tab active" data-tab="dashboard">Dashboard</button>
+        <button class="tab" data-tab="prospects">Prospects</button>
         <button class="tab" data-tab="clients">Clients</button>
         <button class="tab" data-tab="payments">Payments</button>
         <button class="tab" data-tab="expenses">Expenses</button>
@@ -73,6 +74,12 @@
             <div id="overdueList"></div>
           </div>
         </div>
+        <div class="card" id="prospectFollowupCard" hidden>
+          <div class="card-header">
+            <h2>Prospects to follow up</h2>
+          </div>
+          <div id="prospectFollowupList"></div>
+        </div>
         <div class="card" id="upsellCard" hidden>
           <div class="card-header">
             <h2>Upsell follow-ups due</h2>
@@ -105,6 +112,24 @@
           <span id="clientSearchCount" style="font-size:13px;color:#888;white-space:nowrap;"></span>
         </div>
         <div class="card no-pad" id="clientsList"></div>
+      </section>
+
+      <!-- Prospects -->
+      <section id="tab-prospects" class="tab-panel">
+        <div class="row-between">
+          <h2>Demo prospects</h2>
+          <button class="btn-primary" id="addProspectBtn">+ Add prospect</button>
+        </div>
+        <div class="kpi-row" id="prospectKpiRow"></div>
+        <div class="filter-pills" id="prospectFilter">
+          <button class="filter-pill active" data-filter="open">Open</button>
+          <button class="filter-pill" data-filter="requested">Demo requested</button>
+          <button class="filter-pill" data-filter="demo_sent">Demo sent</button>
+          <button class="filter-pill" data-filter="won">Won</button>
+          <button class="filter-pill" data-filter="lost">Lost</button>
+          <button class="filter-pill" data-filter="all">All</button>
+        </div>
+        <div class="card no-pad" id="prospectsList"></div>
       </section>
 
       <!-- Payments -->
@@ -168,6 +193,6 @@
   <div id="modal" class="modal hidden"></div>
   <div id="toast" class="toast hidden"></div>
 
-  <script src="app.js?v=20260529-4"></script>
+  <script src="app.js?v=20260529-5"></script>
 </body>
 </html>

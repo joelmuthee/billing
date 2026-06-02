@@ -148,6 +148,15 @@ function validateExpense(e) {
   return null;
 }
 
+const PROSPECT_STAGES = ["requested", "demo_sent", "won", "lost"];
+function validateProspect(p) {
+  if (!p || typeof p !== "object") return "body must be an object";
+  if (!p.name || typeof p.name !== "string") return "name is required";
+  if (p.stage && !PROSPECT_STAGES.includes(p.stage)) return `stage must be one of ${PROSPECT_STAGES.join(", ")}`;
+  if (p.followup_date && !/^\d{4}-\d{2}-\d{2}$/.test(p.followup_date)) return "followup_date must be YYYY-MM-DD";
+  return null;
+}
+
 function validateExpensePayment(p) {
   if (!p || typeof p !== "object") return "body must be an object";
   if (!Number.isInteger(p.expense_id)) return "expense_id is required";
@@ -226,6 +235,7 @@ export default {
       const expenses = await env.DB.prepare("SELECT * FROM expenses ORDER BY name COLLATE NOCASE").all();
       const expensePayments = await env.DB.prepare("SELECT * FROM expense_payments ORDER BY paid_on DESC, id DESC").all();
       const scheduled = await env.DB.prepare("SELECT * FROM scheduled_payments ORDER BY due_date ASC").all();
+      const prospects = await env.DB.prepare("SELECT * FROM prospects ORDER BY created_at DESC").all();
       const clients = (clientsRs.results || []).map((c) => ({
         ...c,
         services: parseServices(c.services),
@@ -236,6 +246,7 @@ export default {
         expenses: expenses.results || [],
         expense_payments: expensePayments.results || [],
         scheduled_payments: scheduled.results || [],
+        prospects: prospects.results || [],
       });
     }
 
@@ -614,6 +625,67 @@ export default {
       const id = Number(expensePaymentMatch[1]);
       await env.DB.prepare("DELETE FROM expense_payments WHERE id = ?").bind(id).run();
       return json({ ok: true });
+    }
+
+    // ─────────── Prospects (demo pipeline) ───────────
+    if (request.method === "POST" && path === "/api/prospects") {
+      const body = await readBody(request);
+      const err = validateProspect(body);
+      if (err) return json({ error: err }, 400);
+      const result = await env.DB.prepare(
+        `INSERT INTO prospects (name, business, phone, email, demo_url, stage, followup_date, notes, converted_client_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+        .bind(
+          body.name.trim(),
+          body.business || null,
+          body.phone || null,
+          body.email || null,
+          body.demo_url || null,
+          body.stage || "requested",
+          body.followup_date || null,
+          body.notes || null,
+          Number.isInteger(body.converted_client_id) ? body.converted_client_id : null
+        )
+        .run();
+      const id = result.meta.last_row_id;
+      const created = await env.DB.prepare("SELECT * FROM prospects WHERE id = ?").bind(id).first();
+      return json({ prospect: created }, 201);
+    }
+
+    const prospectMatch = path.match(/^\/api\/prospects\/(\d+)$/);
+    if (prospectMatch) {
+      const id = Number(prospectMatch[1]);
+      if (request.method === "PUT") {
+        const body = await readBody(request);
+        const err = validateProspect(body);
+        if (err) return json({ error: err }, 400);
+        await env.DB.prepare(
+          `UPDATE prospects
+           SET name = ?, business = ?, phone = ?, email = ?, demo_url = ?, stage = ?, followup_date = ?, notes = ?, converted_client_id = ?
+           WHERE id = ?`
+        )
+          .bind(
+            body.name.trim(),
+            body.business || null,
+            body.phone || null,
+            body.email || null,
+            body.demo_url || null,
+            body.stage || "requested",
+            body.followup_date || null,
+            body.notes || null,
+            Number.isInteger(body.converted_client_id) ? body.converted_client_id : null,
+            id
+          )
+          .run();
+        const updated = await env.DB.prepare("SELECT * FROM prospects WHERE id = ?").bind(id).first();
+        if (!updated) return json({ error: "not found" }, 404);
+        return json({ prospect: updated });
+      }
+      if (request.method === "DELETE") {
+        await env.DB.prepare("DELETE FROM prospects WHERE id = ?").bind(id).run();
+        return json({ ok: true });
+      }
     }
 
     // Manually trigger the digest (for testing without waiting for the cron)
