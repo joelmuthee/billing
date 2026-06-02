@@ -147,6 +147,8 @@ People who asked for a demo but haven't committed live in the **Prospects** tab,
 
 Filter pills: Open (default) / Demo requested / Demo sent / Won / Lost / All.
 
+**Source / First contact.** Both prospects and clients have a **Source** field (how you found them: Instagram, WhatsApp, Referral, etc. — type anything, common ones are suggested) and a **First contact** date (defaults to today). It shows as a small "via Instagram" badge on the row. When a prospect converts to a client, the source and date carry over automatically.
+
 ## Daily overdue email digest
 
 The worker runs a cron at **5am UTC = 8am Nairobi**. If anything is overdue or due in the next 3 days, it emails chat@essenceautomations.com a digest with each item's amount, days late, and invoice status. Quiet days send nothing. This is a self-notification, not client outreach.

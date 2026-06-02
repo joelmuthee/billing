@@ -52,7 +52,8 @@ Total monthly cost on free tiers: zero. No third-party services. No email send (
     │   ├── 006_invoice_type.sql
     │   ├── 007_subaccount_paused.sql
     │   ├── 008_ended_date.sql
-    │   └── 009_prospects.sql
+    │   ├── 009_prospects.sql
+    │   └── 010_source.sql
     └── src/index.js        worker entry (auth + CRUD + bump logic + scheduled digest)
 ```
 
@@ -87,6 +88,8 @@ invoice_sent_date TEXT                                   -- the actual date the 
 subaccount_paused TEXT                                   -- date the GHL subaccount / catalog site was paused for non-payment (orthogonal to status; null = live)
 catalog_api_base TEXT                                    -- catalog client's shop worker URL, for the pause-website kill switch (null for non-catalog clients)
 ended_date TEXT                                          -- date the client churned / went on a break; bounds the accrual active-window (start_date THROUGH this month, then stops). Null = still running. See "Client lifecycle" below.
+source TEXT                                              -- how the lead was found: Instagram / WhatsApp / Referral / ... (free text, datalist-suggested)
+source_date TEXT                                         -- ISO; date they first came in. Carried over from a prospect on convert.
 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 ```
 
@@ -158,8 +161,12 @@ stage TEXT NOT NULL DEFAULT 'requested'                  -- 'requested' | 'demo_
 followup_date TEXT                                       -- ISO; next nudge date, drives the dashboard "Prospects to follow up" card
 notes TEXT
 converted_client_id INTEGER                              -- set when "Won -> client" creates a client record; links prospect to the client it became
+source TEXT                                              -- how the lead was found (same as clients.source)
+source_date TEXT                                         -- ISO; date they first came in
 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 ```
+
+`source` / `source_date` live on both `clients` and `prospects` (migration 010). Shared `sourceFieldsHtml()` renders the input pair; a global `<datalist id="sourceOptions">` suggests common channels but the field is free text. On convert, both values carry from the prospect into the prefilled client form.
 
 ### `expense_payments`
 
