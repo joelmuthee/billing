@@ -51,13 +51,14 @@ Total monthly cost on free tiers: zero. No third-party services. No email send (
     │   ├── 005_invoice_tracking.sql
     │   ├── 006_invoice_type.sql
     │   ├── 007_subaccount_paused.sql
-    │   └── 008_ended_date.sql
+    │   ├── 008_ended_date.sql
+    │   └── 009_prospects.sql
     └── src/index.js        worker entry (auth + CRUD + bump logic + scheduled digest)
 ```
 
 ## Data model
 
-Five tables.
+Six tables.
 
 ### `clients`
 
@@ -142,6 +143,24 @@ ended_date TEXT                                          -- date the expense was
 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 ```
 
+### `prospects`
+
+Demo prospects: leads who asked for a demo but haven't committed. Deliberately a separate table from `clients` (no plan, no amount, no billing) so the clients table and its KPIs/accrual stay clean. See the design note below.
+
+```sql
+id INTEGER PK
+name TEXT NOT NULL
+business TEXT
+phone TEXT                                               -- for the WhatsApp follow-up draft
+email TEXT
+demo_url TEXT                                            -- link to the demo you built/sent
+stage TEXT NOT NULL DEFAULT 'requested'                  -- 'requested' | 'demo_sent' | 'won' | 'lost'
+followup_date TEXT                                       -- ISO; next nudge date, drives the dashboard "Prospects to follow up" card
+notes TEXT
+converted_client_id INTEGER                              -- set when "Won -> client" creates a client record; links prospect to the client it became
+created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+```
+
 ### `expense_payments`
 
 Same shape as `payments` but for expenses.
@@ -165,7 +184,7 @@ All require `Authorization: Bearer <ADMIN_TOKEN>` except `/api/health`.
 |---|---|---|
 | GET | `/api/health` | Liveness probe (no auth) |
 | POST | `/api/auth` | Sanity-check the token (used by login screen) |
-| GET | `/api/data` | Single bulk fetch: clients, payments, expenses, expense_payments, scheduled_payments |
+| GET | `/api/data` | Single bulk fetch: clients, payments, expenses, expense_payments, scheduled_payments, prospects |
 | POST | `/api/clients` | Create |
 | PUT | `/api/clients/:id` | Update |
 | DELETE | `/api/clients/:id` | Delete (cascades payments + scheduled) |
@@ -183,14 +202,18 @@ All require `Authorization: Bearer <ADMIN_TOKEN>` except `/api/health`.
 | DELETE | `/api/expenses/:id` | |
 | POST | `/api/expense-payments` | Record expense payment, bumps expense.next_due |
 | DELETE | `/api/expense-payments/:id` | |
+| POST | `/api/prospects` | Create a demo prospect |
+| PUT | `/api/prospects/:id` | Update (stage changes, follow-up date, convert-link) |
+| DELETE | `/api/prospects/:id` | Delete (no cascade — prospects own no child rows) |
 
 CORS is `Access-Control-Allow-Origin: *`. The bearer token is the only real boundary.
 
 ## Front-end shape
 
-Single page, 5 tabs:
+Single page, 6 tabs:
 
-1. **Dashboard** — Cash view. KPI row (this-month / outstanding / next-30d / active count split recurring vs one-off), upcoming (clients + scheduled merged) + overdue, upsell follow-ups due, recent payments. Quick-action buttons up top: "+ Record payment", "+ Add client".
+1. **Dashboard** — Cash view. KPI row (this-month / outstanding / next-30d / active count split recurring vs one-off), upcoming (clients + scheduled merged) + overdue, **prospects to follow up** (overdue demo-prospect follow-ups), upsell follow-ups due, recent payments. Quick-action buttons up top: "+ Record payment", "+ Add client".
+1b. **Prospects** — Demo pipeline. Stage KPIs (Open pipeline / To follow up / Won / Lost), filter pills (Open / Demo requested / Demo sent / Won / Lost / All), and a list. Per-row: Mark demo sent, Follow up (WhatsApp draft), Won -> client (prefills + creates a client record, links back via `converted_client_id`, marks prospect won), Lost, Edit (Delete lives in Edit). "+ Add prospect" up top.
 2. **Clients** — Growth KPI row (Added this month / Last 3 months / Last 12 months / All time, each click-drillable to the client list for that window). Filter pills (All / Recurring / One off with counts). Search box. Per-row actions kept lean to the frequent + reversible ones: Pay / Reminder / Pause (active) or Resume (paused/churned) / Edit (+ catalog-only buttons for shop clients). The rare or destructive actions live inside the Edit modal, not on the row: **Churn** is the Status dropdown (+ "Ended on" date), **Delete** is the bottom-left button (type-to-confirm), and **+ Schedule payment** (for staged deposit/balance billing) sits in the same action bar. Keeps the everyday row clean and stops accidental destructive clicks.
 3. **Payments** — Inbound payment log.
 4. **Expenses** — Recurring expenses list + recent expense payments + 3 buttons: Log payment (for recurring), + Add recurring, + Record expense (one-off shortcut that creates expense + payment in one submit).
@@ -250,6 +273,14 @@ Fix: a separate `subaccount_paused` date field, independent of `status`. The "Pa
 The lesson (see Obsidian): two things are only "the same state" if they behave identically in *every* view. Paused-by-choice (don't bill, hide from overdue) and paused-for-nonpayment (still owed, keep in overdue) diverge in the overdue view, so they can't share a state. `status = 'paused'` now means only the intentional-break case.
 
 Terminology: "pause" not "suspend", matching GHL.
+
+### Prospects are a separate table, not a client status
+
+Demo prospects (asked for a demo, haven't committed) are tracked in their own `prospects` table, NOT as a `clients` row with `status='prospect'`. Same orthogonality reasoning as subaccount-pause vs status: a prospect has no plan, amount, due date, payments, invoices, or accrual contribution. Shoehorning them into `clients` would mean every client KPI, the accrual `entityActiveInMonth` loop, the overdue list, the revenue chart, and the reminders would all need a "but skip prospects" guard. A separate table keeps the clients domain clean and lets prospects have their own lean shape (stage + follow-up date).
+
+Pipeline: `requested` (build the demo) -> `demo_sent` (waiting) -> `won` / `lost`. A `followup_date` on every open prospect drives the Dashboard "Prospects to follow up" card so nothing goes cold. The **Won -> client** action is the one bridge between the two tables: it prefills and creates a `clients` row from the prospect's contact details, stores the new client id back on the prospect (`converted_client_id`), and flips the prospect to `won` — but only after the client is actually saved (cancel the client form and the prospect stays open). Reuses the existing add-client modal via an optional `{prefill, onCreated}` arg on `editClient` rather than duplicating the form.
+
+Lean by choice: no estimated value or service fields (owner's call) — name, business, phone, email, demo link, stage, follow-up date, notes. Money figures start when they become a client.
 
 ### Client lifecycle: pause vs churn, and `ended_date` as the accrual boundary
 

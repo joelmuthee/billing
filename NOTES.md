@@ -135,6 +135,18 @@ Both set an **"Ended on"** date. That date is the accrual cut-off: the client ke
 
 To pause a client who's just paid: send + collect their current invoice first (so they stay on the overdue/upcoming list while you chase it), then hit Pause. Pausing clears their next due date, so doing it too early would drop them off the chase list.
 
+## Demo prospects (the Prospects tab)
+
+People who asked for a demo but haven't committed live in the **Prospects** tab, separate from clients (they have no plan, amount or billing yet). The point is they don't fall through the cracks.
+
+- **Stages:** Demo requested -> Demo sent -> Won / Lost. New prospects start at "Demo requested".
+- **Follow-up date:** every prospect gets one (defaults to 3 days out). Open prospects whose date has passed show up on the **Dashboard** in a "Prospects to follow up" card, and in the "To follow up" KPI on the tab.
+- **Per-row actions:** *Mark demo sent* (advances the stage), *Follow up* (opens WhatsApp with a draft message about the demo), *Won -> client*, *Lost*, *Edit*. Delete is inside Edit.
+- **Won -> client:** when they commit, hit this. It opens the Add-client form prefilled with their name/business/phone/email — fill in plan/amount/start date and save. The prospect is then marked Won and linked to the new client. If you cancel the client form, the prospect stays open (nothing lost).
+- **Lost:** keeps the record (for your win/lost counts) but drops them out of the open pipeline. *Reopen* on a won/lost prospect puts them back.
+
+Filter pills: Open (default) / Demo requested / Demo sent / Won / Lost / All.
+
 ## Daily overdue email digest
 
 The worker runs a cron at **5am UTC = 8am Nairobi**. If anything is overdue or due in the next 3 days, it emails chat@essenceautomations.com a digest with each item's amount, days late, and invoice status. Quiet days send nothing. This is a self-notification, not client outreach.
