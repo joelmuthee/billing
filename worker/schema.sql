@@ -110,6 +110,11 @@ CREATE TABLE IF NOT EXISTS prospects (
   converted_client_id INTEGER,
   source TEXT,
   source_date TEXT,
+  -- Catalog kill-switch for trial sites: catalog_api_base wires the Pause/Resume-web
+  -- button (browser → catalog worker /api/suspend); subaccount_paused records the date
+  -- the trial site was taken offline. Mirrors the same two fields on the clients table.
+  catalog_api_base TEXT,
+  subaccount_paused TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_prospects_stage ON prospects(stage);

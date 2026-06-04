@@ -642,8 +642,8 @@ export default {
       const err = validateProspect(body);
       if (err) return json({ error: err }, 400);
       const result = await env.DB.prepare(
-        `INSERT INTO prospects (name, business, phone, email, demo_url, stage, followup_date, notes, converted_client_id, source, source_date)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO prospects (name, business, phone, email, demo_url, stage, followup_date, notes, converted_client_id, source, source_date, catalog_api_base)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
         .bind(
           body.name.trim(),
@@ -656,7 +656,8 @@ export default {
           body.notes || null,
           Number.isInteger(body.converted_client_id) ? body.converted_client_id : null,
           body.source || null,
-          body.source_date || null
+          body.source_date || null,
+          body.catalog_api_base || null
         )
         .run();
       const id = result.meta.last_row_id;
@@ -673,7 +674,7 @@ export default {
         if (err) return json({ error: err }, 400);
         await env.DB.prepare(
           `UPDATE prospects
-           SET name = ?, business = ?, phone = ?, email = ?, demo_url = ?, stage = ?, followup_date = ?, notes = ?, converted_client_id = ?, source = ?, source_date = ?
+           SET name = ?, business = ?, phone = ?, email = ?, demo_url = ?, stage = ?, followup_date = ?, notes = ?, converted_client_id = ?, source = ?, source_date = ?, catalog_api_base = ?
            WHERE id = ?`
         )
           .bind(
@@ -688,6 +689,7 @@ export default {
             Number.isInteger(body.converted_client_id) ? body.converted_client_id : null,
             body.source || null,
             body.source_date || null,
+            body.catalog_api_base || null,
             id
           )
           .run();
@@ -699,6 +701,21 @@ export default {
         await env.DB.prepare("DELETE FROM prospects WHERE id = ?").bind(id).run();
         return json({ ok: true });
       }
+    }
+
+    // Pause / resume a trial prospect's catalog website (kill-switch for demos).
+    // Records the paused date; the browser makes the actual catalog /api/suspend call
+    // (worker→worker is blocked by CF 1042). Mirrors /api/clients/:id/subaccount.
+    const prospectSubMatch = path.match(/^\/api\/prospects\/(\d+)\/subaccount$/);
+    if (prospectSubMatch && request.method === "POST") {
+      const id = Number(prospectSubMatch[1]);
+      const body = await readBody(request);
+      const newValue = body && body.paused ? new Date().toISOString().slice(0, 10) : null;
+      await env.DB.prepare("UPDATE prospects SET subaccount_paused = ? WHERE id = ?")
+        .bind(newValue, id).run();
+      const updated = await env.DB.prepare("SELECT * FROM prospects WHERE id = ?").bind(id).first();
+      if (!updated) return json({ error: "not found" }, 404);
+      return json({ prospect: updated });
     }
 
     // Manually trigger the digest (for testing without waiting for the cron)

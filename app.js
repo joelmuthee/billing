@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260602-1';
+const APP_VERSION = '20260604-1';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
 
 // Service catalogue, sourced from essenceautomations.com
@@ -682,6 +682,37 @@ window.resumeSubaccount = async function (id) {
     if (isWeb) await catalogSuspend(c, false);
     await loadData();
     toast(isWeb ? `${c.name} website back online` : `${c.name} subaccount resumed`);
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+};
+
+// Trial prospects can carry a catalog_api_base too (demo sites built before they
+// commit). Same browser→catalog-worker kill-switch as clients, keyed off the
+// prospect's subaccount_paused date. catalogSuspend() is generic over any object
+// with a catalog_api_base, so it's reused as-is.
+window.pauseProspectWeb = async function (id) {
+  const p = state.prospects.find((x) => x.id === id);
+  if (!p || !p.catalog_api_base) return;
+  if (!confirm(`Take ${p.name}'s trial website offline now?\n\nVisitors will immediately see a "temporarily offline" notice (no products, no ordering). It comes straight back when you resume it.`)) return;
+  try {
+    await api(`/api/prospects/${id}/subaccount`, { method: 'POST', body: JSON.stringify({ paused: true }) });
+    await catalogSuspend(p, true);
+    await loadData();
+    toast(`${p.name} website taken offline`);
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+};
+
+window.resumeProspectWeb = async function (id) {
+  const p = state.prospects.find((x) => x.id === id);
+  if (!p || !p.catalog_api_base) return;
+  try {
+    await api(`/api/prospects/${id}/subaccount`, { method: 'POST', body: JSON.stringify({ paused: false }) });
+    await catalogSuspend(p, false);
+    await loadData();
+    toast(`${p.name} website back online`);
   } catch (err) {
     toast(err.message, 'error');
   }
@@ -2741,10 +2772,14 @@ function prospectRowHtml(p) {
           ${p.phone ? `<span class="mono">${escapeHtml(p.phone)}</span>` : ''}
           ${p.source ? `<span class="badge muted">via ${escapeHtml(p.source)}</span>` : ''}
           ${p.demo_url ? `<a href="${escapeAttr(p.demo_url)}" target="_blank" rel="noopener" style="color:var(--brand-orange-deep);">Demo ↗</a>` : ''}
+          ${p.catalog_api_base && p.subaccount_paused ? `<span class="badge warn">⏸ Website offline ${fmtDateShort(p.subaccount_paused)}</span>` : ''}
         </div>
         ${p.notes ? `<div class="sub" style="margin-top:4px;">${escapeHtml(p.notes)}</div>` : ''}
       </div>
       <div class="actions">
+        ${p.catalog_api_base ? (p.subaccount_paused
+          ? `<button class="btn-sm" onclick="resumeProspectWeb(${p.id})" title="Bring their trial website back online">Resume web</button>`
+          : `<button class="btn-sm danger" onclick="pauseProspectWeb(${p.id})" title="Take their trial website offline">Pause web</button>`) : ''}
         ${p.stage === 'requested' ? `<button class="btn-sm" onclick="setProspectStage(${p.id},'demo_sent')" title="Mark the demo as sent">Mark demo sent</button>` : ''}
         ${isOpen && p.phone ? `<button class="btn-sm" onclick="prospectFollowupWA(${p.id})" title="Open WhatsApp with a follow-up draft">Follow up</button>` : ''}
         ${isOpen ? `<button class="btn-sm" onclick="convertProspect(${p.id})" title="They committed, create their client record">Won → client</button>` : ''}
@@ -2823,6 +2858,7 @@ function serializeProspect(p, overrides = {}) {
     converted_client_id: p.converted_client_id || null,
     source: p.source || null,
     source_date: p.source_date || null,
+    catalog_api_base: p.catalog_api_base || null,
     ...overrides,
   };
 }
@@ -2933,6 +2969,10 @@ function prospectFormHtml(p) {
       </div>
       ${sourceFieldsHtml(isEdit ? p : null)}
       <label>
+        <span>Catalog API base <span class="hint">(only for trial catalog sites — enables the Pause/Resume-web button)</span></span>
+        <input type="url" name="catalog_api_base" placeholder="https://shop-api.stawisystems.workers.dev" value="${isEdit && p.catalog_api_base ? escapeAttr(p.catalog_api_base) : ''}">
+      </label>
+      <label>
         <span>Notes <span class="hint">(what they want, context)</span></span>
         <textarea name="notes">${isEdit && p.notes ? escapeHtml(p.notes) : ''}</textarea>
       </label>
@@ -2964,6 +3004,7 @@ window.editProspect = function (id) {
       converted_client_id: p ? (p.converted_client_id || null) : null,
       source: (fd.get('source') || '').trim() || null,
       source_date: fd.get('source_date') || null,
+      catalog_api_base: (fd.get('catalog_api_base') || '').trim() || null,
     };
     try {
       if (p) await api(`/api/prospects/${p.id}`, { method: 'PUT', body: JSON.stringify(body) });
