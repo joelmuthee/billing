@@ -393,7 +393,7 @@ export default {
             "SELECT upsell_followup_date FROM clients WHERE id = ?"
           ).bind(body.client_id).first();
           if (existing && !existing.upsell_followup_date) {
-            const followup = addMonths(body.paid_on, 3);
+            const followup = addMonths(body.paid_on, 2);
             await env.DB.prepare("UPDATE clients SET upsell_followup_date = ? WHERE id = ?")
               .bind(followup, body.client_id).run();
           }

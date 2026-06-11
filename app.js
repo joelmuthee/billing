@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260611-1';
+const APP_VERSION = '20260611-2';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
 
 // Service catalogue, sourced from essenceautomations.com
@@ -751,7 +751,9 @@ function renderUpsellFollowups() {
         ${c.upsell_notes ? `<div class="sub" style="margin-top:4px;">${escapeHtml(c.upsell_notes)}</div>` : ''}
       </div>
       <div class="actions">
-        ${reminderAction(c, 'upcoming')}
+        ${c.plan === 'one-off'
+          ? `<button class="btn-sm wa" onclick="pitch3k(${c.id})" title="WhatsApp draft introducing the Ksh 3,000/mo plan">Pitch 3k plan</button>`
+          : reminderAction(c, 'upcoming')}
         <button class="btn-sm" onclick="snoozeUpsell(${c.id})">Snooze 30d</button>
         <button class="btn-sm" onclick="clearUpsell(${c.id})">Done</button>
         <button class="btn-sm" onclick="editClient(${c.id})">Edit</button>
@@ -759,6 +761,32 @@ function renderUpsellFollowups() {
     </div>
   `).join('');
 }
+
+// WhatsApp pitch introducing the Ksh 3,000/mo Shop Records package to a
+// one-off Shopfront client (their natural next step). Surfaced on the upsell
+// follow-up card when their follow-up date comes due (defaults to 2 months).
+function upsell3kMessage(c) {
+  return `Hi ${firstName(c)}, hope business has been good since we put your shop online. Quick one: I can now add a simple dashboard to your shop for Ksh 3,000 a month. It tracks your stock, records your in-shop sales and gives receipts, shows who still owes you, and works out your real profit. Want me to switch it on so you can try it?\n\nJoel, Essence Automations`;
+}
+
+window.pitch3k = function (id) {
+  const c = state.clients.find((x) => x.id === id);
+  if (!c) return;
+  const msg = upsell3kMessage(c);
+  const digits = (c.phone || '').replace(/\D/g, '');
+  if (digits) {
+    window.open(`https://wa.me/${digits}?text=${encodeURIComponent(msg)}`, '_blank', 'noopener');
+    return;
+  }
+  openModal(`
+    <h2>Pitch the 3k plan</h2>
+    <p class="muted" style="margin-bottom:14px;">No phone saved for ${escapeHtml(c.name)}. Copy this and send it however you reach them.</p>
+    <textarea readonly style="width:100%;height:200px;padding:10px 12px;border:1px solid #e5e5e5;border-radius:8px;font:inherit;resize:vertical;">${escapeHtml(msg)}</textarea>
+    <div class="modal-actions">
+      <button type="button" class="btn-primary" onclick="closeModal()">Done</button>
+    </div>
+  `);
+};
 
 window.snoozeUpsell = async function (id) {
   const c = state.clients.find((x) => x.id === id);
@@ -2301,8 +2329,8 @@ function clientFormHtml(c) {
           <textarea name="upsell_notes" placeholder="AI Chat, CRM, Social Planner, Ads…">${isEdit && c.upsell_notes ? escapeHtml(c.upsell_notes) : ''}</textarea>
         </label>
         <label>
-          <span>Remind me to follow up on <span class="hint">(defaults to 3 months out for new one-offs)</span></span>
-          <input type="date" name="upsell_followup_date" value="${isEdit && c.upsell_followup_date ? c.upsell_followup_date : (!isEdit ? addMonthsISO(todayISO(), 3) : '')}">
+          <span>Remind me to follow up on <span class="hint">(defaults to 2 months out for new one-offs)</span></span>
+          <input type="date" name="upsell_followup_date" value="${isEdit && c.upsell_followup_date ? c.upsell_followup_date : (!isEdit ? addMonthsISO(todayISO(), 2) : '')}">
         </label>
       </div>
       <p class="error hidden" id="clientFormErr"></p>
