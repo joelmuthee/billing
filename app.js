@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260604-1';
+const APP_VERSION = '20260611-1';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
 
 // Service catalogue, sourced from essenceautomations.com
@@ -13,6 +13,7 @@ const SERVICES_CATEGORIES = [
   { name: 'Get Found', items: [
     { value: 'websites', label: 'Website' },
     { value: 'catalog-website', label: 'Catalogue Website' },
+    { value: 'shopfront-oneoff', label: 'Shopfront (one-off)' },
     { value: 'gbp-booster', label: 'GBP Booster' },
     { value: 'seo-content', label: 'SEO Content Engine' },
     { value: 'email-prospecting', label: 'Email Prospecting' },
