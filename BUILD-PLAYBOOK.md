@@ -195,7 +195,7 @@ All require `Authorization: Bearer <ADMIN_TOKEN>` except `/api/health`.
 | POST | `/api/clients` | Create |
 | PUT | `/api/clients/:id` | Update |
 | DELETE | `/api/clients/:id` | Delete (cascades payments + scheduled) |
-| POST | `/api/payments` | Record payment, bumps client.next_due. Accepts optional `scheduled_payment_id` to clear a scheduled item in the same call. For one-off completion: only flips status to `completed` if no unpaid scheduled remain. Clears `subaccount_paused` (service resumes) and reactivates a `status='paused'` recurring client. Auto-sets upsell_followup_date to paid_on + 3 months if not already set. |
+| POST | `/api/payments` | Record payment, bumps client.next_due. Accepts optional `scheduled_payment_id` to clear a scheduled item in the same call. For one-off completion: only flips status to `completed` if no unpaid scheduled remain. Clears `subaccount_paused` (service resumes) and reactivates a `status='paused'` recurring client. Auto-sets upsell_followup_date to paid_on + 2 months if not already set. |
 | POST | `/api/clients/:id/subaccount` | Body `{ paused: bool }`. Pauses/resumes the client's GHL subaccount (`subaccount_paused` date). Independent of billing status — does not remove them from overdue. |
 | DELETE | `/api/payments/:id` | |
 | POST | `/api/clients/:id/invoice` | Body `{ sent: bool }`. Marks/unmarks the invoice for the client's current cycle. Stamps `invoice_sent_for_next_due` (= next_due) and `invoice_sent_date` (= today). |
@@ -263,9 +263,9 @@ A staged one-off (deposit + balance) is modelled as a one-off client plus N rows
 
 Net result: status is correct regardless of which action the user does first. Caught the BKM Properties incident where the 40k deposit was logged before the 35k balance was scheduled, leaving the project visually "completed" with money still owed.
 
-### Auto-suggest 3-month upsell follow-up
+### Auto-suggest a 2-month upsell follow-up
 
-When a one-off completes, the worker auto-sets `upsell_followup_date = paid_on + 3 months` if the user hadn't picked one. Three months out is the sweet spot for "you've used the website for a while, time to talk about adding AI Chat / Ads / CRM." Surfaces on the dashboard with Snooze 30d / Done / Edit actions.
+When a one-off completes, the worker auto-sets `upsell_followup_date = paid_on + 2 months` if the user hadn't picked one (the add-client form defaults the same). Two months is enough time for a one-off Shopfront catalog client to have lived with their site before the natural next step — the **Ksh 3,000/mo Shop Records** package. Surfaces on the dashboard "Upsell follow-ups due" card with Snooze 30d / Done / Edit. For `plan === 'one-off'` rows the card shows a **"Pitch 3k plan"** button (`pitch3k()`/`upsell3kMessage()` in `app.js`) that opens WhatsApp with a ready draft introducing the 3k package (stock, in-shop sales + receipts, who-owes-you, profit). It replaces the generic payment-reminder action there, which was broken for one-offs (their `next_due` is null). Manual send, per the no-auto-send rule.
 
 ### Invoice tracking is per-cycle and decoupled from reminders
 
