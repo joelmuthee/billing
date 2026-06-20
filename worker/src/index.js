@@ -540,8 +540,8 @@ export default {
       const next_due = body.next_due || (body.plan === "one-off" ? null : body.start_date);
       const status = body.status || "active";
       const result = await env.DB.prepare(
-        `INSERT INTO expenses (name, category, amount, method, plan, start_date, next_due, status, notes, ended_date, tag)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO expenses (name, category, amount, method, plan, start_date, next_due, status, notes, ended_date, tag, autopay)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
         .bind(
           body.name.trim(),
@@ -554,7 +554,8 @@ export default {
           status,
           body.notes || null,
           body.ended_date || null,
-          body.tag || null
+          body.tag || null,
+          body.autopay ? 1 : 0
         )
         .run();
       const id = result.meta.last_row_id;
@@ -572,7 +573,7 @@ export default {
         await env.DB.prepare(
           `UPDATE expenses
            SET name = ?, category = ?, amount = ?, method = ?, plan = ?,
-               start_date = ?, next_due = ?, status = ?, notes = ?, ended_date = ?, tag = ?
+               start_date = ?, next_due = ?, status = ?, notes = ?, ended_date = ?, tag = ?, autopay = ?
            WHERE id = ?`
         )
           .bind(
@@ -587,6 +588,7 @@ export default {
             body.notes || null,
             body.ended_date || null,
             body.tag || null,
+            body.autopay ? 1 : 0,
             id
           )
           .run();
@@ -729,13 +731,52 @@ export default {
       return json({ ok: true, result });
     }
 
+    // Manually run autopay (records any due autopay expense payments now)
+    if (request.method === "POST" && path === "/api/run-autopay") {
+      const recorded = await runAutopay(env);
+      return json({ ok: true, recorded });
+    }
+
     return json({ error: "not found" }, 404);
   },
 
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(runOverdueDigest(env));
+    ctx.waitUntil((async () => {
+      await runAutopay(env);
+      await runOverdueDigest(env);
+    })());
   },
 };
+
+// ─────────── Autopay: auto-record payments for autopay expenses ───────────
+// On each daily run, any active autopay expense whose next_due has arrived gets
+// a payment recorded (dated the due day) and its next_due rolled forward. Loops
+// so a missed run catches up multiple cycles. The card already charged it; this
+// just keeps the books in sync without a manual "Pay" click.
+async function runAutopay(env) {
+  const today = nairobiTodayISO();
+  const rs = await env.DB.prepare(
+    "SELECT * FROM expenses WHERE autopay = 1 AND status = 'active' AND next_due IS NOT NULL AND next_due <= ?"
+  ).bind(today).all();
+  const due = rs.results || [];
+  const recorded = [];
+  for (const e of due) {
+    const period = periodMonths(e.plan);
+    if (period <= 0) continue; // one-off can't autopay
+    let nd = e.next_due;
+    let guard = 0;
+    while (nd && nd <= today && guard < 36) {
+      await env.DB.prepare(
+        "INSERT INTO expense_payments (expense_id, amount, paid_on, method, reference, notes) VALUES (?, ?, ?, ?, ?, ?)"
+      ).bind(e.id, e.amount, nd, e.method || "card", null, "Autopay").run();
+      recorded.push({ name: e.name, amount: e.amount, paid_on: nd });
+      nd = addMonths(nd, period);
+      guard++;
+    }
+    await env.DB.prepare("UPDATE expenses SET next_due = ? WHERE id = ?").bind(nd, e.id).run();
+  }
+  return recorded;
+}
 
 // ─────────── Daily overdue / due-soon digest (self-notification) ───────────
 

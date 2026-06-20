@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260620-6';
+const APP_VERSION = '20260620-7';
 // Meta ad account that runs the IG ad boosts (the "Open Ads Manager" button + future sync).
 const META_ADS_ACCOUNT = '10213388279954524';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
@@ -1221,6 +1221,7 @@ function expenseRowHtml(e, nested) {
         <div class="primary">${escapeHtml(e.name)}${e.category ? ` <span class="muted-2" style="font-weight:400;">· ${escapeHtml(e.category)}</span>` : ''}</div>
         <div class="sub">
           <span class="badge plan-${e.plan}">${planLabel(e.plan)}</span>
+          ${e.autopay ? `<span class="badge ok" title="Auto-recorded each month on the due day">↻ Autopay</span>` : ''}
           ${e.tag ? `<span class="badge" style="background:var(--brand-orange-soft);color:var(--brand-orange-deep);">${escapeHtml(e.tag)}</span>` : ''}
           ${e.status !== 'active' ? `<span class="badge muted">${e.status}</span>` : ''}
           ${overdue ? `<span class="badge danger">Overdue</span>` : ''}
@@ -1407,6 +1408,10 @@ function expenseFormHtml(e) {
           <input type="date" name="next_due" value="${isEdit && e.next_due ? e.next_due : ''}">
         </label>
       </div>
+      <label style="flex-direction:row;align-items:center;gap:8px;cursor:pointer;">
+        <input type="checkbox" name="autopay" ${isEdit && e.autopay ? 'checked' : ''} style="width:auto;margin:0;">
+        <span style="margin:0;">Autopay <span class="hint">(charged to card automatically — records the payment each month on the due day, no manual Pay)</span></span>
+      </label>
       ${isEdit ? `
         <label>
           <span>Status</span>
@@ -1453,6 +1458,7 @@ window.editExpense = function (id) {
       notes: (fd.get('notes') || '').trim() || null,
       status: fd.get('status') || 'active',
       tag: (fd.get('tag') || '').trim() || null,
+      autopay: fd.get('autopay') ? 1 : 0,
     };
     try {
       if (e) await api(`/api/expenses/${e.id}`, { method: 'PUT', body: JSON.stringify(body) });
@@ -2688,6 +2694,7 @@ function serializeExpenseForUpdate(e, overrides = {}) {
     notes: e.notes,
     ended_date: e.ended_date || null,
     tag: e.tag || null,
+    autopay: e.autopay ? 1 : 0,
     ...overrides,
   };
 }
