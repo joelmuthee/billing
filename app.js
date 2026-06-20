@@ -5,9 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260620-7';
-// Meta ad account that runs the IG ad boosts (the "Open Ads Manager" button + future sync).
-const META_ADS_ACCOUNT = '10213388279954524';
+const APP_VERSION = '20260620-8';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
 
 // Service catalogue, sourced from essenceautomations.com
@@ -1288,7 +1286,6 @@ function renderExpensesList() {
         </div>
         <div class="actions">
           <div class="amount num">${fmtKES(adsTotal)}</div>
-          <button class="btn-sm" onclick="event.stopPropagation(); openAdsManager()" title="Open Meta Ads Manager for this account">Open Ads Manager ↗</button>
         </div>
       </div>
       ${open ? ads.map((e) => expenseRowHtml(e, true)).join('') + `
@@ -1304,10 +1301,6 @@ function renderExpensesList() {
 window.toggleAdsGroup = function () {
   state.adsExpanded = !state.adsExpanded;
   renderExpensesList();
-};
-
-window.openAdsManager = function () {
-  window.open(`https://adsmanager.facebook.com/adsmanager/manage/campaigns?act=${META_ADS_ACCOUNT}`, '_blank', 'noopener');
 };
 
 function renderRecentExpensePayments() {
