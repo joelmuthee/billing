@@ -5,7 +5,9 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260611-2';
+const APP_VERSION = '20260620-1';
+// Meta ad account that runs the IG ad boosts (the "Open Ads Manager" button + future sync).
+const META_ADS_ACCOUNT = '10213388279954524';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
 
 // Service catalogue, sourced from essenceautomations.com
@@ -55,6 +57,7 @@ const state = {
   clientSearch: '',
   prospectFilter: 'open',
   upcomingDays: 30,
+  adsExpanded: false,
 };
 
 // ────────── Formatting helpers ──────────
@@ -1018,7 +1021,7 @@ function renderClientsList() {
     const sa = a.status === 'active' ? 0 : 1;
     const sb = b.status === 'active' ? 0 : 1;
     if (sa !== sb) return sa - sb;
-    return a.name.localeCompare(b.name);
+    return b.id - a.id; // newest added first (active still floats above churned/paused)
   });
   el.innerHTML = sorted.map((c) => {
     const overdue = c.status === 'active' && c.next_due && c.next_due < todayISO();
@@ -1199,41 +1202,79 @@ function renderExpenseKpis() {
   `;
 }
 
+function expenseRowHtml(e, nested) {
+  const overdue = e.status === 'active' && e.next_due && e.next_due < todayISO();
+  return `
+    <div class="list-row"${nested ? ' style="background:var(--brand-orange-soft);"' : ''}>
+      <div>
+        <div class="primary">${escapeHtml(e.name)}${e.category ? ` <span class="muted-2" style="font-weight:400;">· ${escapeHtml(e.category)}</span>` : ''}</div>
+        <div class="sub">
+          <span class="badge plan-${e.plan}">${planLabel(e.plan)}</span>
+          ${e.status !== 'active' ? `<span class="badge muted">${e.status}</span>` : ''}
+          ${overdue ? `<span class="badge danger">Overdue</span>` : ''}
+          ${e.next_due ? `<span>Next due ${fmtDate(e.next_due)}</span>` : `<span>${e.plan === 'one-off' ? 'One off' : 'No due date'}</span>`}
+        </div>
+      </div>
+      <div class="actions">
+        <div class="amount num">${fmtKES(e.amount)}</div>
+        <button class="btn-sm" onclick="logExpensePayment(${e.id})">Pay</button>
+        <button class="btn-sm" onclick="editExpense(${e.id})">Edit</button>
+        <button class="btn-sm danger" onclick="deleteExpense(${e.id})">Delete</button>
+      </div>
+    </div>
+  `;
+}
+
 function renderExpensesList() {
   const el = $('#expensesList');
   if (state.expenses.length === 0) {
     el.innerHTML = '<div class="empty">No expenses yet. Add your first one.</div>';
     return;
   }
-  const sorted = [...state.expenses].sort((a, b) => {
+  const isAd = (e) => (e.category || '').toLowerCase() === 'ads';
+  const ads = state.expenses.filter(isAd);
+  const others = state.expenses.filter((e) => !isAd(e));
+
+  others.sort((a, b) => {
     const sa = a.status === 'active' ? 0 : 1;
     const sb = b.status === 'active' ? 0 : 1;
     if (sa !== sb) return sa - sb;
     return a.name.localeCompare(b.name);
   });
-  el.innerHTML = sorted.map((e) => {
-    const overdue = e.status === 'active' && e.next_due && e.next_due < todayISO();
-    return `
-      <div class="list-row">
+  ads.sort((a, b) => (b.start_date || '').localeCompare(a.start_date || '') || a.name.localeCompare(b.name));
+
+  let html = others.map((e) => expenseRowHtml(e)).join('');
+
+  // IG / Meta ad spend collapses under one group so a growing list of boosts
+  // doesn't clutter the expenses. Header shows the running total; expand for the items.
+  if (ads.length) {
+    const adsTotal = ads.reduce((s, e) => s + e.amount, 0);
+    const open = state.adsExpanded;
+    html += `
+      <div class="list-row" onclick="toggleAdsGroup()" style="cursor:pointer;">
         <div>
-          <div class="primary">${escapeHtml(e.name)}${e.category ? ` <span class="muted-2" style="font-weight:400;">· ${escapeHtml(e.category)}</span>` : ''}</div>
-          <div class="sub">
-            <span class="badge plan-${e.plan}">${planLabel(e.plan)}</span>
-            ${e.status !== 'active' ? `<span class="badge muted">${e.status}</span>` : ''}
-            ${overdue ? `<span class="badge danger">Overdue</span>` : ''}
-            ${e.next_due ? `<span>Next due ${fmtDate(e.next_due)}</span>` : `<span>${e.plan === 'one-off' ? 'One off' : 'No due date'}</span>`}
-          </div>
+          <div class="primary"><span style="display:inline-block;width:14px;color:var(--muted);">${open ? '▾' : '▸'}</span> Ad expenses <span class="muted-2" style="font-weight:400;">· ${ads.length} item${ads.length === 1 ? '' : 's'}</span></div>
+          <div class="sub"><span class="badge muted">Meta / Instagram</span></div>
         </div>
         <div class="actions">
-          <div class="amount num">${fmtKES(e.amount)}</div>
-          <button class="btn-sm" onclick="logExpensePayment(${e.id})">Pay</button>
-          <button class="btn-sm" onclick="editExpense(${e.id})">Edit</button>
-          <button class="btn-sm danger" onclick="deleteExpense(${e.id})">Delete</button>
+          <div class="amount num">${fmtKES(adsTotal)}</div>
+          <button class="btn-sm" onclick="event.stopPropagation(); openAdsManager()" title="Open Meta Ads Manager for this account">Open Ads Manager ↗</button>
         </div>
       </div>
+      ${open ? ads.map((e) => expenseRowHtml(e, true)).join('') : ''}
     `;
-  }).join('');
+  }
+  el.innerHTML = html;
 }
+
+window.toggleAdsGroup = function () {
+  state.adsExpanded = !state.adsExpanded;
+  renderExpensesList();
+};
+
+window.openAdsManager = function () {
+  window.open(`https://adsmanager.facebook.com/adsmanager/manage/campaigns?act=${META_ADS_ACCOUNT}`, '_blank', 'noopener');
+};
 
 function renderRecentExpensePayments() {
   const recent = state.expense_payments.slice(0, 10);
@@ -2829,11 +2870,8 @@ function renderProspects() {
   list.sort((a, b) => {
     const ao = PROSPECT_OPEN.includes(a.stage);
     const bo = PROSPECT_OPEN.includes(b.stage);
-    if (ao !== bo) return ao ? -1 : 1;
-    const af = a.followup_date || '9999-99-99';
-    const bf = b.followup_date || '9999-99-99';
-    if (ao && af !== bf) return af < bf ? -1 : 1;
-    return (b.created_at || '').localeCompare(a.created_at || '');
+    if (ao !== bo) return ao ? -1 : 1; // open pipeline stays above won/lost
+    return (b.created_at || '').localeCompare(a.created_at || '') || (b.id - a.id); // newest added first
   });
   if (list.length === 0) {
     const label = f === 'all' ? 'prospects' : f === 'open' ? 'open prospects' : `prospects in "${(PROSPECT_STAGE[f] || {}).label || f}"`;
