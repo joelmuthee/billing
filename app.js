@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260620-3';
+const APP_VERSION = '20260620-4';
 // Meta ad account that runs the IG ad boosts (the "Open Ads Manager" button + future sync).
 const META_ADS_ACCOUNT = '10213388279954524';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
@@ -1218,7 +1218,7 @@ function expenseRowHtml(e, nested) {
       </div>
       <div class="actions">
         <div class="amount num">${fmtKES(e.amount)}</div>
-        <button class="btn-sm" onclick="logExpensePayment(${e.id})">Pay</button>
+        ${e.status === 'active' ? `<button class="btn-sm" onclick="logExpensePayment(${e.id})">Pay</button>` : ''}
         ${e.plan !== 'one-off' && e.status === 'active'
           ? `<button class="btn-sm" onclick="pauseExpense(${e.id})" title="Stop this cost, e.g. the client paused the service it pays for">Pause</button>`
           : (e.status === 'paused'
