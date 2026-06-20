@@ -540,8 +540,8 @@ export default {
       const next_due = body.next_due || (body.plan === "one-off" ? null : body.start_date);
       const status = body.status || "active";
       const result = await env.DB.prepare(
-        `INSERT INTO expenses (name, category, amount, method, plan, start_date, next_due, status, notes, ended_date)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO expenses (name, category, amount, method, plan, start_date, next_due, status, notes, ended_date, tag)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
         .bind(
           body.name.trim(),
@@ -553,7 +553,8 @@ export default {
           next_due,
           status,
           body.notes || null,
-          body.ended_date || null
+          body.ended_date || null,
+          body.tag || null
         )
         .run();
       const id = result.meta.last_row_id;
@@ -571,7 +572,7 @@ export default {
         await env.DB.prepare(
           `UPDATE expenses
            SET name = ?, category = ?, amount = ?, method = ?, plan = ?,
-               start_date = ?, next_due = ?, status = ?, notes = ?, ended_date = ?
+               start_date = ?, next_due = ?, status = ?, notes = ?, ended_date = ?, tag = ?
            WHERE id = ?`
         )
           .bind(
@@ -585,6 +586,7 @@ export default {
             body.status || "active",
             body.notes || null,
             body.ended_date || null,
+            body.tag || null,
             id
           )
           .run();

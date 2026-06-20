@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260620-2';
+const APP_VERSION = '20260620-3';
 // Meta ad account that runs the IG ad boosts (the "Open Ads Manager" button + future sync).
 const META_ADS_ACCOUNT = '10213388279954524';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
@@ -1210,6 +1210,7 @@ function expenseRowHtml(e, nested) {
         <div class="primary">${escapeHtml(e.name)}${e.category ? ` <span class="muted-2" style="font-weight:400;">· ${escapeHtml(e.category)}</span>` : ''}</div>
         <div class="sub">
           <span class="badge plan-${e.plan}">${planLabel(e.plan)}</span>
+          ${e.tag ? `<span class="badge" style="background:var(--brand-orange-soft);color:var(--brand-orange-deep);">${escapeHtml(e.tag)}</span>` : ''}
           ${e.status !== 'active' ? `<span class="badge muted">${e.status}</span>` : ''}
           ${overdue ? `<span class="badge danger">Overdue</span>` : ''}
           ${e.next_due ? `<span>Next due ${fmtDate(e.next_due)}</span>` : `<span>${e.plan === 'one-off' ? 'One off' : 'No due date'}</span>`}
@@ -1246,20 +1247,30 @@ function renderExpensesList() {
     if (sa !== sb) return sa - sb;
     return a.name.localeCompare(b.name);
   });
-  ads.sort((a, b) => (b.start_date || '').localeCompare(a.start_date || '') || a.name.localeCompare(b.name));
+  // Cluster ads by product (tag), newest first within each product.
+  ads.sort((a, b) => (a.tag || '~').localeCompare(b.tag || '~')
+    || (b.start_date || '').localeCompare(a.start_date || '')
+    || a.name.localeCompare(b.name));
 
   let html = others.map((e) => expenseRowHtml(e)).join('');
 
   // IG / Meta ad spend collapses under one group so a growing list of boosts
-  // doesn't clutter the expenses. Header shows the running total; expand for the items.
+  // doesn't clutter the expenses. Header shows the running total + per-product
+  // split; expand for the items.
   if (ads.length) {
     const adsTotal = ads.reduce((s, e) => s + e.amount, 0);
+    const byTag = {};
+    ads.forEach((e) => { const t = e.tag || 'Untagged'; byTag[t] = (byTag[t] || 0) + e.amount; });
+    const breakdown = Object.entries(byTag)
+      .sort((a, b) => b[1] - a[1])
+      .map(([t, v]) => `<span>${escapeHtml(t)} ${fmtKES(v)}</span>`)
+      .join('');
     const open = state.adsExpanded;
     html += `
       <div class="list-row" onclick="toggleAdsGroup()" style="cursor:pointer;">
         <div>
           <div class="primary"><span style="display:inline-block;width:14px;color:var(--muted);">${open ? '▾' : '▸'}</span> Ad expenses <span class="muted-2" style="font-weight:400;">· ${ads.length} item${ads.length === 1 ? '' : 's'}</span></div>
-          <div class="sub"><span class="badge muted">Meta / Instagram</span></div>
+          <div class="sub"><span class="badge muted">Meta / Instagram</span>${breakdown}</div>
         </div>
         <div class="actions">
           <div class="amount num">${fmtKES(adsTotal)}</div>
@@ -1307,6 +1318,15 @@ function renderRecentExpensePayments() {
       </div>
     `;
   }).join('');
+}
+
+// Datalist of products an expense (esp. an ad) might promote — the service
+// catalogue, so "Shopfront", "AI Chat" etc. auto-suggest. Free text.
+function productDatalistHtml(id) {
+  const opts = SERVICES_CATEGORIES.flatMap((c) => c.items)
+    .map((s) => `<option value="${escapeAttr(s.label.replace(/\s*\(one-off\)$/i, ''))}"></option>`)
+    .join('');
+  return `<datalist id="${id}">${opts}</datalist>`;
 }
 
 function expenseFormHtml(e) {
@@ -1371,6 +1391,11 @@ function expenseFormHtml(e) {
         </label>
       ` : ''}
       <label>
+        <span>What's it for? <span class="hint">(the product it promotes, e.g. Shopfront — mainly for ads)</span></span>
+        <input type="text" name="tag" list="expenseTagOptions" placeholder="Shopfront, AI Chat…" value="${isEdit && e.tag ? escapeAttr(e.tag) : ''}">
+      </label>
+      ${productDatalistHtml('expenseTagOptions')}
+      <label>
         <span>Notes <span class="hint">(optional)</span></span>
         <textarea name="notes">${isEdit && e.notes ? escapeHtml(e.notes) : ''}</textarea>
       </label>
@@ -1399,6 +1424,7 @@ window.editExpense = function (id) {
       next_due: fd.get('next_due') || null,
       notes: (fd.get('notes') || '').trim() || null,
       status: fd.get('status') || 'active',
+      tag: (fd.get('tag') || '').trim() || null,
     };
     try {
       if (e) await api(`/api/expenses/${e.id}`, { method: 'PUT', body: JSON.stringify(body) });
@@ -1595,6 +1621,11 @@ window.recordQuickExpense = function () {
         <input type="text" name="reference">
       </label>
       <label>
+        <span>What's it for? <span class="hint">(the product it promotes, e.g. Shopfront — for ads)</span></span>
+        <input type="text" name="tag" list="quickExpenseTagOptions" placeholder="Shopfront, AI Chat…">
+      </label>
+      ${productDatalistHtml('quickExpenseTagOptions')}
+      <label>
         <span>Notes <span class="hint">(optional)</span></span>
         <textarea name="notes"></textarea>
       </label>
@@ -1615,6 +1646,7 @@ window.recordQuickExpense = function () {
     const category = (fd.get('category') || '').trim() || null;
     const reference = (fd.get('reference') || '').trim() || null;
     const notes = (fd.get('notes') || '').trim() || null;
+    const tag = (fd.get('tag') || '').trim() || null;
     try {
       const expenseRes = await api('/api/expenses', {
         method: 'POST',
@@ -1628,6 +1660,7 @@ window.recordQuickExpense = function () {
           next_due: null,
           notes,
           status: 'active',
+          tag,
         }),
       });
       const expenseId = expenseRes.expense.id;
@@ -2617,6 +2650,7 @@ function serializeExpenseForUpdate(e, overrides = {}) {
     status: e.status,
     notes: e.notes,
     ended_date: e.ended_date || null,
+    tag: e.tag || null,
     ...overrides,
   };
 }

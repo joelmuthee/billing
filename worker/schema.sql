@@ -76,6 +76,7 @@ CREATE TABLE IF NOT EXISTS expenses (
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','paused','cancelled','completed')),
   notes TEXT,
   ended_date TEXT,
+  tag TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
