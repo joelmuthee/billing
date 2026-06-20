@@ -148,6 +148,7 @@ function validateExpense(e) {
   if (e.next_due && !/^\d{4}-\d{2}-\d{2}$/.test(e.next_due)) return "next_due must be YYYY-MM-DD";
   if (e.amount != null && (typeof e.amount !== "number" || e.amount < 0)) return "amount must be a non-negative number";
   if (e.status && !EXPENSE_STATUSES.includes(e.status)) return `status must be one of ${EXPENSE_STATUSES.join(", ")}`;
+  if (e.ended_date && !/^\d{4}-\d{2}-\d{2}$/.test(e.ended_date)) return "ended_date must be YYYY-MM-DD";
   return null;
 }
 
@@ -539,8 +540,8 @@ export default {
       const next_due = body.next_due || (body.plan === "one-off" ? null : body.start_date);
       const status = body.status || "active";
       const result = await env.DB.prepare(
-        `INSERT INTO expenses (name, category, amount, method, plan, start_date, next_due, status, notes)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO expenses (name, category, amount, method, plan, start_date, next_due, status, notes, ended_date)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
         .bind(
           body.name.trim(),
@@ -551,7 +552,8 @@ export default {
           body.start_date,
           next_due,
           status,
-          body.notes || null
+          body.notes || null,
+          body.ended_date || null
         )
         .run();
       const id = result.meta.last_row_id;
@@ -569,7 +571,7 @@ export default {
         await env.DB.prepare(
           `UPDATE expenses
            SET name = ?, category = ?, amount = ?, method = ?, plan = ?,
-               start_date = ?, next_due = ?, status = ?, notes = ?
+               start_date = ?, next_due = ?, status = ?, notes = ?, ended_date = ?
            WHERE id = ?`
         )
           .bind(
@@ -582,6 +584,7 @@ export default {
             body.next_due || null,
             body.status || "active",
             body.notes || null,
+            body.ended_date || null,
             id
           )
           .run();
