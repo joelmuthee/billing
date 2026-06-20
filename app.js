@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260620-1';
+const APP_VERSION = '20260620-2';
 // Meta ad account that runs the IG ad boosts (the "Open Ads Manager" button + future sync).
 const META_ADS_ACCOUNT = '10213388279954524';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
@@ -1218,6 +1218,11 @@ function expenseRowHtml(e, nested) {
       <div class="actions">
         <div class="amount num">${fmtKES(e.amount)}</div>
         <button class="btn-sm" onclick="logExpensePayment(${e.id})">Pay</button>
+        ${e.plan !== 'one-off' && e.status === 'active'
+          ? `<button class="btn-sm" onclick="pauseExpense(${e.id})" title="Stop this cost, e.g. the client paused the service it pays for">Pause</button>`
+          : (e.status === 'paused'
+            ? `<button class="btn-sm" onclick="resumeExpense(${e.id})" title="Bring this cost back">Resume</button>`
+            : '')}
         <button class="btn-sm" onclick="editExpense(${e.id})">Edit</button>
         <button class="btn-sm danger" onclick="deleteExpense(${e.id})">Delete</button>
       </div>
@@ -2596,6 +2601,103 @@ window.resumeClient = function (id) {
       await loadData();
       closeModal();
       toast(`${c.name} resumed`);
+    } catch (err) { toast(err.message, 'error'); }
+  });
+};
+
+function serializeExpenseForUpdate(e, overrides = {}) {
+  return {
+    name: e.name,
+    category: e.category,
+    amount: e.amount,
+    method: e.method,
+    plan: e.plan,
+    start_date: e.start_date,
+    next_due: e.next_due,
+    status: e.status,
+    notes: e.notes,
+    ended_date: e.ended_date || null,
+    ...overrides,
+  };
+}
+
+// Pause a recurring expense when its cost stops (e.g. the client paying for it
+// pauses). Drops it from monthly burn + overdue, keeps it counted through the
+// chosen month, then stops. Resumable. Mirrors the client pause.
+window.pauseExpense = function (id) {
+  const e = state.expenses.find((x) => x.id === id);
+  if (!e) return;
+  const defaultEnd = e.ended_date || lastDayOfMonth(todayISO().slice(0, 7));
+  openModal(`
+    <h2>Pause ${escapeHtml(e.name)}?</h2>
+    <p class="muted" style="margin-bottom:14px;">Stops this cost going forward. It drops out of your monthly burn and won't show as overdue, but it keeps counting through the month you set, then stops. Use this when a cost pauses, like a client pausing the service it pays for. Resume any time.</p>
+    <form id="pauseExpenseForm">
+      <label>
+        <span>Counts toward spend through <span class="hint">(its last active month)</span></span>
+        <input type="date" name="ended_date" value="${defaultEnd}" required>
+      </label>
+      <p class="muted" id="pauseExpenseHint" style="font-size:13px;margin:6px 2px 14px;"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn-ghost" onclick="closeModal()">Cancel</button>
+        <button type="submit" class="btn-primary">Pause expense</button>
+      </div>
+    </form>
+  `);
+  const dateInput = $('#pauseExpenseForm [name="ended_date"]');
+  const hint = $('#pauseExpenseHint');
+  const updateHint = () => {
+    hint.textContent = dateInput.value
+      ? `Counts through ${monthLabelFromISO(dateInput.value.slice(0, 7))}, then stops.`
+      : '';
+  };
+  dateInput.addEventListener('input', updateHint);
+  updateHint();
+  $('#pauseExpenseForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const body = serializeExpenseForUpdate(e, {
+      status: 'paused',
+      ended_date: dateInput.value || defaultEnd,
+      next_due: null,
+    });
+    try {
+      await api(`/api/expenses/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+      await loadData();
+      closeModal();
+      toast(`${e.name} paused`);
+    } catch (err) { toast(err.message, 'error'); }
+  });
+};
+
+window.resumeExpense = function (id) {
+  const e = state.expenses.find((x) => x.id === id);
+  if (!e) return;
+  openModal(`
+    <h2>Resume ${escapeHtml(e.name)}?</h2>
+    <p class="muted" style="margin-bottom:14px;">Brings this cost back into your monthly burn. Pick when the next one is due. It starts counting again from that month.</p>
+    <form id="resumeExpenseForm">
+      <label>
+        <span>Next due date</span>
+        <input type="date" name="next_due" value="${todayISO()}" required>
+      </label>
+      <div class="modal-actions">
+        <button type="button" class="btn-ghost" onclick="closeModal()">Cancel</button>
+        <button type="submit" class="btn-primary">Resume expense</button>
+      </div>
+    </form>
+  `);
+  $('#resumeExpenseForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const nd = $('#resumeExpenseForm [name="next_due"]').value;
+    const body = serializeExpenseForUpdate(e, {
+      status: 'active',
+      ended_date: null,
+      next_due: nd || null,
+    });
+    try {
+      await api(`/api/expenses/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+      await loadData();
+      closeModal();
+      toast(`${e.name} resumed`);
     } catch (err) { toast(err.message, 'error'); }
   });
 };
