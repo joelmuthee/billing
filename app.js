@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260620-8';
+const APP_VERSION = '20260620-9';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
 
 // Service catalogue, sourced from essenceautomations.com
@@ -1304,6 +1304,15 @@ window.toggleAdsGroup = function () {
 };
 
 function renderRecentExpensePayments() {
+  const card = $('#expensePaymentsCard');
+  // This month's payments already show in the list above (recurring + ad group),
+  // so only break them out for a past period (last month) where the list doesn't.
+  if (state.expensePeriod === 'thismonth') {
+    if (card) card.hidden = true;
+    return;
+  }
+  if (card) card.hidden = false;
+
   const { start, end, monthLabel } = expensePeriodBounds();
   const titleEl = $('#expensePaymentsTitle');
   if (titleEl) titleEl.textContent = `${monthLabel} payments`;
