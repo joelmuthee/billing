@@ -151,10 +151,14 @@
             <button class="btn-primary" id="quickExpenseBtn">+ Record expense</button>
           </div>
         </div>
+        <div class="seg-control" id="expensePeriod">
+          <button data-p="thismonth" class="active">This month</button>
+          <button data-p="lastmonth">Last month</button>
+        </div>
         <div class="kpi-row" id="expenseKpis"></div>
         <div class="card no-pad" id="expensesList"></div>
         <div class="card">
-          <div class="card-header"><h2>Recent expense payments</h2></div>
+          <div class="card-header"><h2 id="expensePaymentsTitle">This month's payments</h2></div>
           <div id="recentExpensePayments"></div>
         </div>
       </section>
@@ -205,6 +209,6 @@
     <option value="TikTok"></option>
   </datalist>
 
-  <script src="app.js?v=20260620-5"></script>
+  <script src="app.js?v=20260620-6"></script>
 </body>
 </html>

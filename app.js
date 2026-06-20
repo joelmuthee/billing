@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260620-5';
+const APP_VERSION = '20260620-6';
 // Meta ad account that runs the IG ad boosts (the "Open Ads Manager" button + future sync).
 const META_ADS_ACCOUNT = '10213388279954524';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
@@ -58,6 +58,7 @@ const state = {
   prospectFilter: 'open',
   upcomingDays: 30,
   adsExpanded: false,
+  expensePeriod: 'thismonth',
 };
 
 // ────────── Formatting helpers ──────────
@@ -1171,6 +1172,18 @@ function renderExpenses() {
   renderRecentExpensePayments();
 }
 
+// Date window for the Expenses tab period toggle. "This month" runs to today;
+// "Last month" is the whole previous calendar month.
+function expensePeriodBounds() {
+  const today = todayISO();
+  const thisMonth = today.slice(0, 7);
+  if (state.expensePeriod === 'lastmonth') {
+    const pm = addMonthsISO(thisMonth + '-01', -1).slice(0, 7);
+    return { start: pm + '-01', end: lastDayOfMonth(pm), label: 'last month', monthLabel: monthLabelFromISO(pm) };
+  }
+  return { start: thisMonth + '-01', end: today, label: 'this month', monthLabel: monthLabelFromISO(thisMonth) };
+}
+
 function renderExpenseKpis() {
   const monthlyBurn = state.expenses
     .filter((e) => e.status === 'active' && e.plan === 'monthly')
@@ -1180,11 +1193,9 @@ function renderExpenseKpis() {
     .reduce((s, e) => s + e.amount / 3, 0);
   const burn = monthlyBurn + quarterlyBurn;
 
-  const today = todayISO();
-  const monthStart = today.slice(0, 7) + '-01';
-  const monthSpent = state.expense_payments
-    .filter((p) => p.paid_on >= monthStart && p.paid_on <= today)
-    .reduce((s, p) => s + p.amount, 0);
+  const { start, end, label } = expensePeriodBounds();
+  const periodPays = state.expense_payments.filter((p) => p.paid_on >= start && p.paid_on <= end);
+  const periodSpent = periodPays.reduce((s, p) => s + p.amount, 0);
 
   const activeCount = state.expenses.filter((e) => e.status === 'active').length;
 
@@ -1195,9 +1206,9 @@ function renderExpenseKpis() {
       <div class="kpi-sub">${activeCount} active</div>
     </div>
     <div class="kpi-card">
-      <div class="kpi-label">Paid this month</div>
-      <div class="kpi-value">${fmtKES(monthSpent)}</div>
-      <div class="kpi-sub">${state.expense_payments.filter((p) => p.paid_on >= monthStart).length} payments</div>
+      <div class="kpi-label">Paid ${label}</div>
+      <div class="kpi-value">${fmtKES(periodSpent)}</div>
+      <div class="kpi-sub">${periodPays.length} payment${periodPays.length === 1 ? '' : 's'}</div>
     </div>
   `;
 }
@@ -1299,18 +1310,25 @@ window.openAdsManager = function () {
 };
 
 function renderRecentExpensePayments() {
-  const recent = state.expense_payments.slice(0, 10);
+  const { start, end, monthLabel } = expensePeriodBounds();
+  const titleEl = $('#expensePaymentsTitle');
+  if (titleEl) titleEl.textContent = `${monthLabel} payments`;
+
+  const pays = state.expense_payments
+    .filter((p) => p.paid_on >= start && p.paid_on <= end)
+    .sort((a, b) => (b.paid_on || '').localeCompare(a.paid_on || '') || b.id - a.id);
   const el = $('#recentExpensePayments');
-  if (recent.length === 0) {
-    el.innerHTML = '<div class="empty">No expense payments recorded yet.</div>';
+  if (pays.length === 0) {
+    el.innerHTML = `<div class="empty">No expense payments in ${escapeHtml(monthLabel)}.</div>`;
     return;
   }
-  el.innerHTML = recent.map((p) => {
+  const total = pays.reduce((s, p) => s + p.amount, 0);
+  el.innerHTML = pays.map((p) => {
     const e = state.expenses.find((x) => x.id === p.expense_id);
     return `
       <div class="list-row">
         <div>
-          <div class="primary">${escapeHtml(e ? e.name : 'Unknown expense')}</div>
+          <div class="primary">${escapeHtml(e ? e.name : 'Unknown expense')}${e && e.tag ? ` <span class="muted-2" style="font-weight:400;">· ${escapeHtml(e.tag)}</span>` : ''}</div>
           <div class="sub">
             ${p.method ? `<span class="badge muted">${methodLabel(p.method)}</span>` : ''}
             ${p.reference ? `<span class="mono">Ref ${escapeHtml(p.reference)}</span>` : ''}
@@ -1323,7 +1341,11 @@ function renderRecentExpensePayments() {
         </div>
       </div>
     `;
-  }).join('');
+  }).join('') + `
+    <div class="list-row" style="font-weight:600;">
+      <div><div class="primary">Total paid ${escapeHtml(monthLabel)}</div></div>
+      <div class="actions"><div class="amount num">${fmtKES(total)}</div></div>
+    </div>`;
 }
 
 // Datalist of products an expense (esp. an ad) might promote — the service
@@ -2196,6 +2218,15 @@ $('#revenuePeriod').addEventListener('click', (e) => {
   state.revenuePeriod = btn.dataset.p;
   $$('#revenuePeriod button').forEach((b) => b.classList.toggle('active', b === btn));
   renderRevenue();
+});
+
+$('#expensePeriod').addEventListener('click', (e) => {
+  const btn = e.target.closest('button');
+  if (!btn) return;
+  state.expensePeriod = btn.dataset.p;
+  $$('#expensePeriod button').forEach((b) => b.classList.toggle('active', b === btn));
+  renderExpenseKpis();
+  renderRecentExpensePayments();
 });
 
 // ────────── Forms ──────────
