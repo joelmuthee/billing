@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260620-4';
+const APP_VERSION = '20260620-5';
 // Meta ad account that runs the IG ad boosts (the "Open Ads Manager" button + future sync).
 const META_ADS_ACCOUNT = '10213388279954524';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
@@ -1261,10 +1261,12 @@ function renderExpensesList() {
     const adsTotal = ads.reduce((s, e) => s + e.amount, 0);
     const byTag = {};
     ads.forEach((e) => { const t = e.tag || 'Untagged'; byTag[t] = (byTag[t] || 0) + e.amount; });
-    const breakdown = Object.entries(byTag)
-      .sort((a, b) => b[1] - a[1])
-      .map(([t, v]) => `<span>${escapeHtml(t)} ${fmtKES(v)}</span>`)
-      .join('');
+    const tags = Object.entries(byTag).sort((a, b) => b[1] - a[1]);
+    // Only show the per-product split when there's more than one product —
+    // otherwise it just duplicates the total.
+    const breakdown = tags.length > 1
+      ? tags.map(([t, v]) => `<span>${escapeHtml(t)} ${fmtKES(v)}</span>`).join('')
+      : '';
     const open = state.adsExpanded;
     html += `
       <div class="list-row" onclick="toggleAdsGroup()" style="cursor:pointer;">
@@ -1277,7 +1279,11 @@ function renderExpensesList() {
           <button class="btn-sm" onclick="event.stopPropagation(); openAdsManager()" title="Open Meta Ads Manager for this account">Open Ads Manager ↗</button>
         </div>
       </div>
-      ${open ? ads.map((e) => expenseRowHtml(e, true)).join('') : ''}
+      ${open ? ads.map((e) => expenseRowHtml(e, true)).join('') + `
+        <div class="list-row" style="background:var(--brand-orange-soft);font-weight:600;">
+          <div><div class="primary">Total ads spent${tags.length > 1 ? ` <span class="muted-2" style="font-weight:400;">· ${tags.map(([t]) => escapeHtml(t)).join(', ')}</span>` : ''}</div></div>
+          <div class="actions"><div class="amount num">${fmtKES(adsTotal)}</div></div>
+        </div>` : ''}
     `;
   }
   el.innerHTML = html;
