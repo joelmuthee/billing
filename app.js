@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260622-1';
+const APP_VERSION = '20260622-2';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
 
 // Service catalogue, sourced from essenceautomations.com
@@ -392,6 +392,39 @@ function clientNameById(id) {
 function referralCount(id) {
   return state.clients.filter((x) => x.referred_by === id).length;
 }
+
+// Drill-down: the specific clients a given referrer brought in.
+window.showReferrals = function (id) {
+  const referrer = state.clients.find((x) => x.id === id);
+  if (!referrer) return;
+  const refs = state.clients
+    .filter((x) => x.referred_by === id)
+    .sort((a, b) => (b.start_date || '').localeCompare(a.start_date || ''));
+  openModal(`
+    <h2>Referrals from ${escapeHtml(referrer.name)}</h2>
+    <p class="muted" style="margin-bottom:14px;">${refs.length} referral${refs.length === 1 ? '' : 's'}${referrer.free_months > 0 ? ` · 🎁 ${referrer.free_months} free month${referrer.free_months === 1 ? '' : 's'} unused` : ''}.</p>
+    <div class="card no-pad">
+      ${refs.map((c) => `
+        <div class="list-row">
+          <div>
+            <div class="primary">${escapeHtml(c.name)}${c.business ? ` <span class="muted-2" style="font-weight:400;">· ${escapeHtml(c.business)}</span>` : ''}</div>
+            <div class="sub">
+              <span class="badge plan-${c.plan}">${planLabel(c.plan)}</span>
+              ${c.status !== 'active' ? `<span class="badge muted">${c.status}</span>` : ''}
+              <span>Joined ${fmtDate(c.start_date)}</span>
+            </div>
+          </div>
+          <div class="actions">
+            <button class="btn-sm" onclick="editClient(${c.id})">Open</button>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn-primary" onclick="closeModal()">Close</button>
+    </div>
+  `);
+};
 
 function waReminderUrl(c, kind) {
   if (!c.phone) return null;
@@ -995,11 +1028,13 @@ function renderClientFilter() {
   const all = state.clients.length;
   const recurring = state.clients.filter((c) => c.plan === 'monthly' || c.plan === 'quarterly').length;
   const oneOff = state.clients.filter((c) => c.plan === 'one-off').length;
+  const referrers = state.clients.filter((c) => referralCount(c.id) > 0).length;
   const f = state.clientFilter;
   $('#clientFilter').innerHTML = `
     <button type="button" class="filter-pill${f === 'all' ? ' active' : ''}" data-filter="all">All <span class="filter-count">${all}</span></button>
     <button type="button" class="filter-pill${f === 'recurring' ? ' active' : ''}" data-filter="recurring">Recurring <span class="filter-count">${recurring}</span></button>
     <button type="button" class="filter-pill${f === 'one-off' ? ' active' : ''}" data-filter="one-off">One off <span class="filter-count">${oneOff}</span></button>
+    ${referrers > 0 ? `<button type="button" class="filter-pill${f === 'referrers' ? ' active' : ''}" data-filter="referrers">Referrers <span class="filter-count">${referrers}</span></button>` : ''}
   `;
 }
 
@@ -1015,15 +1050,20 @@ function renderClientsList() {
   const filtered = state.clients.filter((c) => {
     if (state.clientFilter === 'recurring' && !(c.plan === 'monthly' || c.plan === 'quarterly')) return false;
     if (state.clientFilter === 'one-off' && c.plan !== 'one-off') return false;
+    if (state.clientFilter === 'referrers' && referralCount(c.id) === 0) return false;
     if (q && !`${c.name || ''} ${c.business || ''} ${c.phone || ''}`.toLowerCase().includes(q)) return false;
     return true;
   });
   const countEl = $('#clientSearchCount');
   if (countEl) countEl.textContent = q ? `${filtered.length} match${filtered.length === 1 ? '' : 'es'}` : '';
   if (filtered.length === 0) {
+    const emptyMsg = state.clientFilter === 'recurring' ? 'No recurring clients yet.'
+      : state.clientFilter === 'one-off' ? 'No one-off clients yet.'
+      : state.clientFilter === 'referrers' ? 'No clients have brought in referrals yet.'
+      : 'No clients yet.';
     el.innerHTML = q
       ? `<div class="empty">No clients match “${escapeHtml(state.clientSearch.trim())}”.</div>`
-      : `<div class="empty">No ${state.clientFilter === 'recurring' ? 'recurring' : 'one-off'} clients yet.</div>`;
+      : `<div class="empty">${emptyMsg}</div>`;
     return;
   }
   const sorted = [...filtered].sort((a, b) => {
@@ -1048,7 +1088,7 @@ function renderClientsList() {
             ${c.phone ? `<span class="mono">${escapeHtml(c.phone)}</span>` : ''}
             ${c.source ? `<span class="badge muted">via ${escapeHtml(c.source)}</span>` : ''}
             ${c.free_months > 0 ? `<span class="badge ok" title="Referral credit, auto-applied at next bill">🎁 ${c.free_months} free month${c.free_months === 1 ? '' : 's'}</span>` : ''}
-            ${referralCount(c.id) > 0 ? `<span class="badge muted">${referralCount(c.id)} referral${referralCount(c.id) === 1 ? '' : 's'}</span>` : ''}
+            ${referralCount(c.id) > 0 ? `<span class="badge muted" style="cursor:pointer;" onclick="showReferrals(${c.id})" title="See who they referred">${referralCount(c.id)} referral${referralCount(c.id) === 1 ? '' : 's'} ↗</span>` : ''}
             ${c.referred_by ? `<span class="muted-2">referred by ${escapeHtml(clientNameById(c.referred_by))}</span>` : ''}
           </div>
           ${chips ? `<div class="chips">${chips}</div>` : ''}
