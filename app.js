@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260622-2';
+const APP_VERSION = '20260622-3';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
 
 // Service catalogue, sourced from essenceautomations.com
@@ -1034,7 +1034,7 @@ function renderClientFilter() {
     <button type="button" class="filter-pill${f === 'all' ? ' active' : ''}" data-filter="all">All <span class="filter-count">${all}</span></button>
     <button type="button" class="filter-pill${f === 'recurring' ? ' active' : ''}" data-filter="recurring">Recurring <span class="filter-count">${recurring}</span></button>
     <button type="button" class="filter-pill${f === 'one-off' ? ' active' : ''}" data-filter="one-off">One off <span class="filter-count">${oneOff}</span></button>
-    ${referrers > 0 ? `<button type="button" class="filter-pill${f === 'referrers' ? ' active' : ''}" data-filter="referrers">Referrers <span class="filter-count">${referrers}</span></button>` : ''}
+    <button type="button" class="filter-pill${f === 'referrers' ? ' active' : ''}" data-filter="referrers">Referrers <span class="filter-count">${referrers}</span></button>
   `;
 }
 
