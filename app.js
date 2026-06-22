@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260622-3';
+const APP_VERSION = '20260622-4';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
 
 // Service catalogue, sourced from essenceautomations.com
@@ -57,6 +57,7 @@ const state = {
   upcomingDays: 30,
   adsExpanded: false,
   expensePeriod: 'thismonth',
+  paymentsPeriod: 'thismonth',
 };
 
 // ────────── Formatting helpers ──────────
@@ -1187,13 +1188,32 @@ window.paySchedule = function (scheduledId) {
   recordPayment(c.id, { amount: s.amount, scheduled_payment_id: s.id, reference: s.description || '' });
 };
 
+// Date window for the Payments tab period toggle.
+function paymentsPeriodBounds() {
+  const today = todayISO();
+  const thisMonth = today.slice(0, 7);
+  if (state.paymentsPeriod === 'lastmonth') {
+    const pm = addMonthsISO(thisMonth + '-01', -1).slice(0, 7);
+    return { start: pm + '-01', end: lastDayOfMonth(pm), label: monthLabelFromISO(pm) };
+  }
+  if (state.paymentsPeriod === 'all') {
+    return { start: '0000-00-00', end: '9999-99-99', label: 'all time' };
+  }
+  return { start: thisMonth + '-01', end: today, label: monthLabelFromISO(thisMonth) };
+}
+
 function renderPaymentsList() {
   const el = $('#paymentsList');
-  if (state.payments.length === 0) {
-    el.innerHTML = '<div class="empty">No payments recorded yet.</div>';
+  const { start, end, label } = paymentsPeriodBounds();
+  const pays = state.payments
+    .filter((p) => p.paid_on >= start && p.paid_on <= end)
+    .sort((a, b) => (b.paid_on || '').localeCompare(a.paid_on || '') || b.id - a.id);
+  if (pays.length === 0) {
+    el.innerHTML = `<div class="empty">No payments ${state.paymentsPeriod === 'all' ? 'recorded yet' : `in ${escapeHtml(label)}`}.</div>`;
     return;
   }
-  el.innerHTML = state.payments.map((p) => {
+  const total = pays.reduce((s, p) => s + p.amount, 0);
+  el.innerHTML = pays.map((p) => {
     const c = state.clients.find((x) => x.id === p.client_id);
     return `
       <div class="list-row">
@@ -1212,7 +1232,11 @@ function renderPaymentsList() {
         </div>
       </div>
     `;
-  }).join('');
+  }).join('') + `
+    <div class="list-row" style="font-weight:600;">
+      <div><div class="primary">Total received${state.paymentsPeriod === 'all' ? '' : ` ${escapeHtml(label)}`}</div></div>
+      <div class="actions"><div class="amount num">${fmtKES(total)}</div></div>
+    </div>`;
 }
 
 // ────────── Expenses tab ──────────
@@ -2288,6 +2312,14 @@ $('#expensePeriod').addEventListener('click', (e) => {
   $$('#expensePeriod button').forEach((b) => b.classList.toggle('active', b === btn));
   renderExpenseKpis();
   renderRecentExpensePayments();
+});
+
+$('#paymentsPeriod').addEventListener('click', (e) => {
+  const btn = e.target.closest('button');
+  if (!btn) return;
+  state.paymentsPeriod = btn.dataset.p;
+  $$('#paymentsPeriod button').forEach((b) => b.classList.toggle('active', b === btn));
+  renderPaymentsList();
 });
 
 // ────────── Forms ──────────
