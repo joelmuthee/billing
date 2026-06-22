@@ -53,8 +53,11 @@ Total monthly cost on free tiers: zero. No third-party services. No email send (
     │   ├── 007_subaccount_paused.sql
     │   ├── 008_ended_date.sql
     │   ├── 009_prospects.sql
-    │   └── 010_source.sql
-    └── src/index.js        worker entry (auth + CRUD + bump logic + scheduled digest)
+    │   ├── 010_source.sql
+    │   ├── 011_expense_tag.sql
+    │   ├── 012_autopay.sql
+    │   └── 013_referrals.sql
+    └── src/index.js        worker entry (auth + CRUD + bump logic + scheduled cron)
 ```
 
 ## Data model
@@ -90,6 +93,8 @@ catalog_api_base TEXT                                    -- catalog client's sho
 ended_date TEXT                                          -- date the client churned / went on a break; bounds the accrual active-window (start_date THROUGH this month, then stops). Null = still running. See "Client lifecycle" below.
 source TEXT                                              -- how the lead was found: Instagram / WhatsApp / Referral / ... (free text, datalist-suggested)
 source_date TEXT                                         -- ISO; date they first came in. Carried over from a prospect on convert.
+referred_by INTEGER                                      -- client id who referred this client. Setting it (null -> id) credits that referrer +1 free month.
+free_months INTEGER NOT NULL DEFAULT 0                   -- referral free-month credits. Auto-applied at the next bill by the runFreeMonths cron.
 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 ```
 
@@ -142,7 +147,9 @@ start_date TEXT NOT NULL
 next_due TEXT
 status TEXT NOT NULL DEFAULT 'active'                    -- 'active' | 'paused' | 'cancelled' | 'completed'
 notes TEXT
-ended_date TEXT                                          -- date the expense was cancelled; same accrual-window role as on clients
+ended_date TEXT                                          -- date the expense was cancelled/paused; same accrual-window role as on clients
+tag TEXT                                                 -- what an expense promotes (mainly ads): "Shopfront", "AI Chat", ... Drives the per-product split in the Ad expenses group.
+autopay INTEGER NOT NULL DEFAULT 0                       -- 1 = charged to card automatically; the runAutopay cron records the payment on the due day and rolls next_due
 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 ```
 
@@ -201,6 +208,8 @@ All require `Authorization: Bearer <ADMIN_TOKEN>` except `/api/health`.
 | POST | `/api/clients/:id/invoice` | Body `{ sent: bool }`. Marks/unmarks the invoice for the client's current cycle. Stamps `invoice_sent_for_next_due` (= next_due) and `invoice_sent_date` (= today). |
 | POST | `/api/scheduled-payments/:id/invoice` | Body `{ sent: bool }`. Marks/unmarks the invoice for a scheduled payment (`invoice_sent_on`). |
 | POST | `/api/test-digest` | Manually fire the overdue/due-soon email digest (for testing). No-ops with a preview if `RESEND_API_KEY` unset. |
+| POST | `/api/run-autopay` | Manually run autopay (records due autopay-expense payments now). Also runs nightly in `scheduled()`. |
+| POST | `/api/run-freemonths` | Manually apply due referral free months now. Also runs nightly in `scheduled()`. |
 | POST | `/api/scheduled-payments` | Create future scheduled payment. Auto-reactivates a `completed` one-off client back to `active` (since scheduling more money contradicts "all paid"). Returns `{ scheduled_payment, client, reactivated }`. |
 | PUT | `/api/scheduled-payments/:id` | Update |
 | DELETE | `/api/scheduled-payments/:id` | |
@@ -288,6 +297,18 @@ Demo prospects (asked for a demo, haven't committed) are tracked in their own `p
 Pipeline: `requested` (build the demo) -> `demo_sent` (waiting) -> `won` / `lost`. A `followup_date` on every open prospect drives the Dashboard "Prospects to follow up" card so nothing goes cold. The **Won -> client** action is the one bridge between the two tables: it prefills and creates a `clients` row from the prospect's contact details, stores the new client id back on the prospect (`converted_client_id`), and flips the prospect to `won` — but only after the client is actually saved (cancel the client form and the prospect stays open). Reuses the existing add-client modal via an optional `{prefill, onCreated}` arg on `editClient` rather than duplicating the form.
 
 Lean by choice: no estimated value or service fields (owner's call) — name, business, phone, email, demo link, stage, follow-up date, notes. Money figures start when they become a client.
+
+### Nightly cron does three things, in order
+
+`scheduled()` (cron `0 5 * * *` = 8am Nairobi) runs, in order: **`runAutopay`** (record due autopay-expense payments), **`runFreeMonths`** (apply due referral free months), then **`runOverdueDigest`** (email the owner what's overdue/due-soon). Autopay + free-months run first so the digest reflects post-application state (a client who just got a free month shouldn't email as overdue). Each is also exposed as a `POST /api/run-*` endpoint for manual triggering/testing. All three are idempotent-ish and loop to catch up missed days (capped by a guard).
+
+### Referral program — free month per referral, auto-applied
+
+`clients.referred_by` (FK to another client) + `clients.free_months` (credit count). Setting `referred_by` on a client (on create, or the first edit that sets it null->id) credits that **referrer** `free_months += 1` server-side. Owner-facing: a "Referred by" select + "Free months" field on the client form; rows show a `🎁 N free months` badge, an `N referrals` count, and `referred by X`.
+
+**Applying is automatic (owner's choice, 2026-06).** `runFreeMonths` (nightly) finds active recurring clients with `free_months > 0` whose `next_due` has arrived and, per credit, records a **Ksh 0 `"Free month (referral)"` payment** dated the due day, rolls `next_due` forward **one month** (not the plan period — a "free month" is always one month, so a quarterly client's cadence just shifts a month), and decrements the credit. Loops to catch up multiple overdue cycles.
+
+**Known limitation:** the Ksh 0 payment keeps the *cash* view honest (no money in), but the *accrual* (Revenue tab) still counts the client's normal monthly contribution that month — it's modelled as a billing skip, not a revenue discount. The Ksh 0 payment is the visible trace. Acceptable for the owner's purposes; a true accrual discount would be a bigger change.
 
 ### Client lifecycle: pause vs churn, and `ended_date` as the accrual boundary
 

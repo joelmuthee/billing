@@ -149,6 +149,18 @@ Filter pills: Open (default) / Demo requested / Demo sent / Won / Lost / All.
 
 **Source / First contact.** Both prospects and clients have a **Source** field (how you found them: Instagram, WhatsApp, Referral, etc. — type anything, common ones are suggested) and a **First contact** date (defaults to today). It shows as a small "via Instagram" badge on the row. When a prospect converts to a client, the source and date carry over automatically.
 
+## Referral program (free month per referral)
+
+When you add or edit a client, set **"Referred by"** to whoever sent them. That instantly gives the referrer **+1 free month** credit. On the client row you'll see a **🎁 N free months** badge, an **N referrals** count, and **referred by X**.
+
+**The free month applies itself.** Each night, when a referrer with a credit reaches their next bill, the system records a **Ksh 0 "Free month (referral)"** payment, pushes their next due forward a month, and uses up one credit. No action from you. The **Free months** number on the client form is editable if you ever need to correct a credit.
+
+Note: the free month shows in the cash view (Ksh 0 in) but the Revenue/accrual tab still counts that client's normal monthly figure for the month (it's a billing skip, not a revenue discount; the Ksh 0 payment is the trace).
+
+## Autopay for card-charged expenses
+
+Recurring expenses that auto-charge a card (GHL Monthly on the 8th, Claude Monthly on the 24th) have **Autopay** ticked (a **↻ Autopay** badge on the row). Each night the system auto-records their payment on the due day and rolls the next due forward, so you never click Pay for them. Tick the **Autopay** box on any other card-billed subscription to do the same.
+
 ## Daily overdue email digest
 
 The worker runs a cron at **5am UTC = 8am Nairobi**. If anything is overdue or due in the next 3 days, it emails chat@essenceautomations.com a digest with each item's amount, days late, and invoice status. Quiet days send nothing. This is a self-notification, not client outreach.
