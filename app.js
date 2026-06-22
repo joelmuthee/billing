@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260620-9';
+const APP_VERSION = '20260622-1';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
 
 // Service catalogue, sourced from essenceautomations.com
@@ -383,6 +383,14 @@ function upsellDueClients() {
 
 function firstName(c) {
   return (c.name || '').split(/\s+/)[0] || c.name || '';
+}
+
+function clientNameById(id) {
+  const c = state.clients.find((x) => x.id === id);
+  return c ? c.name : 'Unknown';
+}
+function referralCount(id) {
+  return state.clients.filter((x) => x.referred_by === id).length;
 }
 
 function waReminderUrl(c, kind) {
@@ -835,6 +843,8 @@ function serializeClientForUpdate(c, overrides = {}) {
     ended_date: c.ended_date || null,
     source: c.source || null,
     source_date: c.source_date || null,
+    referred_by: c.referred_by || null,
+    free_months: c.free_months || 0,
     ...overrides,
   };
 }
@@ -1037,6 +1047,9 @@ function renderClientsList() {
             ${c.next_due ? `<span>Next due ${fmtDate(c.next_due)}</span>` : `<span>${c.plan === 'one-off' ? 'One off' : 'No due date'}</span>`}
             ${c.phone ? `<span class="mono">${escapeHtml(c.phone)}</span>` : ''}
             ${c.source ? `<span class="badge muted">via ${escapeHtml(c.source)}</span>` : ''}
+            ${c.free_months > 0 ? `<span class="badge ok" title="Referral credit, auto-applied at next bill">🎁 ${c.free_months} free month${c.free_months === 1 ? '' : 's'}</span>` : ''}
+            ${referralCount(c.id) > 0 ? `<span class="badge muted">${referralCount(c.id)} referral${referralCount(c.id) === 1 ? '' : 's'}</span>` : ''}
+            ${c.referred_by ? `<span class="muted-2">referred by ${escapeHtml(clientNameById(c.referred_by))}</span>` : ''}
           </div>
           ${chips ? `<div class="chips">${chips}</div>` : ''}
         </div>
@@ -2327,6 +2340,10 @@ function sourceFieldsHtml(entity) {
 
 function clientFormHtml(c) {
   const isEdit = !!c;
+  const refOpts = state.clients
+    .filter((x) => !isEdit || x.id !== c.id)
+    .map((x) => `<option value="${x.id}" ${isEdit && c.referred_by === x.id ? 'selected' : ''}>${escapeAttr(x.name)}</option>`)
+    .join('');
   return `
     <h2>${isEdit ? 'Edit client' : 'Add client'}</h2>
     <form id="clientForm">
@@ -2394,6 +2411,19 @@ function clientFormHtml(c) {
         </label>
       </div>
       ${sourceFieldsHtml(isEdit ? c : null)}
+      <div class="form-row">
+        <label>
+          <span>Referred by <span class="hint">(another client — earns them a free month)</span></span>
+          <select name="referred_by">
+            <option value="">— nobody —</option>
+            ${refOpts}
+          </select>
+        </label>
+        <label>
+          <span>Free months <span class="hint">(referral credits, auto-applied at next bill)</span></span>
+          <input type="number" name="free_months" min="0" step="1" value="${isEdit ? (c.free_months || 0) : 0}">
+        </label>
+      </div>
       <div class="form-row">
         <label>
           <span>Invoice type <span class="hint">(how you bill them)</span></span>
@@ -2503,6 +2533,8 @@ window.editClient = function (id, opts = {}) {
       ended_date: fd.get('ended_date') || null,
       source: (fd.get('source') || '').trim() || null,
       source_date: fd.get('source_date') || null,
+      referred_by: Number(fd.get('referred_by')) || null,
+      free_months: Math.max(0, Number(fd.get('free_months')) || 0),
     };
     try {
       if (c) {

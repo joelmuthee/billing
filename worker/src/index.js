@@ -106,6 +106,12 @@ function validateClient(c) {
   if (c.source_date && !/^\d{4}-\d{2}-\d{2}$/.test(c.source_date)) {
     return "source_date must be YYYY-MM-DD";
   }
+  if (c.referred_by != null && !Number.isInteger(c.referred_by)) {
+    return "referred_by must be an integer client id";
+  }
+  if (c.free_months != null && (!Number.isInteger(c.free_months) || c.free_months < 0)) {
+    return "free_months must be a non-negative integer";
+  }
   return null;
 }
 
@@ -262,8 +268,8 @@ export default {
       const next_due = body.next_due || (body.plan === "one-off" ? null : body.start_date);
       const status = body.status || (body.plan === "one-off" ? "active" : "active");
       const result = await env.DB.prepare(
-        `INSERT INTO clients (name, business, plan, amount, method, phone, email, notes, start_date, next_due, status, reminder_method, services, upsell_notes, upsell_followup_date, invoice_type, catalog_api_base, ended_date, source, source_date)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO clients (name, business, plan, amount, method, phone, email, notes, start_date, next_due, status, reminder_method, services, upsell_notes, upsell_followup_date, invoice_type, catalog_api_base, ended_date, source, source_date, referred_by, free_months)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
         .bind(
           body.name.trim(),
@@ -285,10 +291,16 @@ export default {
           body.catalog_api_base || null,
           body.ended_date || null,
           body.source || null,
-          body.source_date || null
+          body.source_date || null,
+          Number.isInteger(body.referred_by) ? body.referred_by : null,
+          Number.isInteger(body.free_months) && body.free_months >= 0 ? body.free_months : 0
         )
         .run();
       const id = result.meta.last_row_id;
+      // Each referral earns the referrer a free-month credit.
+      if (Number.isInteger(body.referred_by) && body.referred_by !== id) {
+        await env.DB.prepare("UPDATE clients SET free_months = free_months + 1 WHERE id = ?").bind(body.referred_by).run();
+      }
       const created = await env.DB.prepare("SELECT * FROM clients WHERE id = ?").bind(id).first();
       return json({ client: { ...created, services: parseServices(created.services) } }, 201);
     }
@@ -300,12 +312,13 @@ export default {
         const body = await readBody(request);
         const err = validateClient(body);
         if (err) return json({ error: err }, 400);
+        const before = await env.DB.prepare("SELECT referred_by FROM clients WHERE id = ?").bind(id).first();
         await env.DB.prepare(
           `UPDATE clients
            SET name = ?, business = ?, plan = ?, amount = ?, method = ?, phone = ?, email = ?, notes = ?,
                start_date = ?, next_due = ?, status = ?, reminder_method = ?, services = ?,
                upsell_notes = ?, upsell_followup_date = ?, invoice_type = ?, catalog_api_base = ?, ended_date = ?,
-               source = ?, source_date = ?
+               source = ?, source_date = ?, referred_by = ?, free_months = ?
            WHERE id = ?`
         )
           .bind(
@@ -329,9 +342,15 @@ export default {
             body.ended_date || null,
             body.source || null,
             body.source_date || null,
+            Number.isInteger(body.referred_by) ? body.referred_by : null,
+            Number.isInteger(body.free_months) && body.free_months >= 0 ? body.free_months : 0,
             id
           )
           .run();
+        // Credit the referrer the first time a referral link is set (null -> set).
+        if ((!before || !before.referred_by) && Number.isInteger(body.referred_by) && body.referred_by !== id) {
+          await env.DB.prepare("UPDATE clients SET free_months = free_months + 1 WHERE id = ?").bind(body.referred_by).run();
+        }
         const updated = await env.DB.prepare("SELECT * FROM clients WHERE id = ?").bind(id).first();
         if (!updated) return json({ error: "not found" }, 404);
         return json({ client: { ...updated, services: parseServices(updated.services) } });
@@ -737,16 +756,52 @@ export default {
       return json({ ok: true, recorded });
     }
 
+    // Manually apply any due referral free months now
+    if (request.method === "POST" && path === "/api/run-freemonths") {
+      const applied = await runFreeMonths(env);
+      return json({ ok: true, applied });
+    }
+
     return json({ error: "not found" }, 404);
   },
 
   async scheduled(event, env, ctx) {
     ctx.waitUntil((async () => {
       await runAutopay(env);
+      await runFreeMonths(env);
       await runOverdueDigest(env);
     })());
   },
 };
+
+// ─────────── Referral free months: auto-apply at the next bill ───────────
+// A referrer with free-month credits gets their next due cycle for free: record
+// a Ksh 0 "Free month (referral)" payment, roll next_due forward one month, and
+// burn one credit. Loops to catch up if overdue with multiple credits.
+async function runFreeMonths(env) {
+  const today = nairobiTodayISO();
+  const rs = await env.DB.prepare(
+    "SELECT * FROM clients WHERE status = 'active' AND free_months > 0 AND plan != 'one-off' AND next_due IS NOT NULL AND next_due <= ?"
+  ).bind(today).all();
+  const due = rs.results || [];
+  const applied = [];
+  for (const c of due) {
+    let nd = c.next_due;
+    let credits = c.free_months;
+    let guard = 0;
+    while (nd && nd <= today && credits > 0 && guard < 36) {
+      await env.DB.prepare(
+        "INSERT INTO payments (client_id, amount, paid_on, method, reference, notes) VALUES (?, ?, ?, ?, ?, ?)"
+      ).bind(c.id, 0, nd, null, null, "Free month (referral)").run();
+      applied.push({ name: c.name, paid_on: nd });
+      nd = addMonths(nd, 1);
+      credits -= 1;
+      guard++;
+    }
+    await env.DB.prepare("UPDATE clients SET next_due = ?, free_months = ? WHERE id = ?").bind(nd, credits, c.id).run();
+  }
+  return applied;
+}
 
 // ─────────── Autopay: auto-record payments for autopay expenses ───────────
 // On each daily run, any active autopay expense whose next_due has arrived gets
