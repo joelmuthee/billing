@@ -12,6 +12,12 @@ database_id = "313e644b-b6b9-41b4-ad56-6971839942ee"
 [ai]
 binding = "AI"
 
+[vars]
+# Daily overdue/due-soon email digest. Set "false" to pause the daily email
+# (autopay + referral free months keep running — those send nothing). Flip to
+# "true" (or remove) and redeploy to resume. Paused at owner request 2026-06-23.
+DIGEST_ENABLED = "false"
+
 # Set secrets via:
 #   npx wrangler secret put ADMIN_TOKEN     -- the login password
 #   npx wrangler secret put RESEND_API_KEY  -- enables the daily overdue email digest

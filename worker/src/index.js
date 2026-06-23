@@ -769,7 +769,8 @@ export default {
     ctx.waitUntil((async () => {
       await runAutopay(env);
       await runFreeMonths(env);
-      await runOverdueDigest(env);
+      // Daily email digest is gated by DIGEST_ENABLED (paused = "false").
+      if (env.DIGEST_ENABLED !== "false") await runOverdueDigest(env);
     })());
   },
 };
