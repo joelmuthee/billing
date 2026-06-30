@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260622-4';
+const APP_VERSION = '20260630-1';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
 
 // Service catalogue, sourced from essenceautomations.com
@@ -652,13 +652,18 @@ async function getCatalogToken() {
   _catalogToken = r.token;
   return _catalogToken;
 }
-async function catalogSuspend(client, suspended) {
+// mode ("client" | "prospect") tells the catalog which paused overlay to show:
+// a paid client gets the neutral "find us on Instagram" page, a prospect gets the
+// one-off win-back pitch. Sent on pause; ignored on resume (overlay isn't shown).
+async function catalogSuspend(client, suspended, mode) {
   if (!client || !client.catalog_api_base) return;
   const token = await getCatalogToken();
+  const body = { suspended: !!suspended };
+  if (mode) body.mode = mode;
   const res = await fetch(`${client.catalog_api_base.replace(/\/+$/, '')}/api/suspend`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ suspended: !!suspended }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`Catalog ${suspended ? 'suspend' : 'restore'} failed (HTTP ${res.status})`);
 }
@@ -710,7 +715,7 @@ window.pauseSubaccount = async function (id) {
   if (!confirm(msg)) return;
   try {
     await api(`/api/clients/${id}/subaccount`, { method: 'POST', body: JSON.stringify({ paused: true }) });
-    if (isWeb) await catalogSuspend(c, true);
+    if (isWeb) await catalogSuspend(c, true, 'client');
     await loadData();
     toast(isWeb ? `${c.name} website taken offline` : `${c.name} subaccount paused`);
   } catch (err) {
@@ -742,7 +747,7 @@ window.pauseProspectWeb = async function (id) {
   if (!confirm(`Take ${p.name}'s trial website offline now?\n\nVisitors will immediately see a "temporarily offline" notice (no products, no ordering). It comes straight back when you resume it.`)) return;
   try {
     await api(`/api/prospects/${id}/subaccount`, { method: 'POST', body: JSON.stringify({ paused: true }) });
-    await catalogSuspend(p, true);
+    await catalogSuspend(p, true, 'prospect');
     await loadData();
     toast(`${p.name} website taken offline`);
   } catch (err) {
