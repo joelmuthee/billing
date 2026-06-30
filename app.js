@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260630-1';
+const APP_VERSION = '20260630-2';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
 
 // Service catalogue, sourced from essenceautomations.com
@@ -632,7 +632,7 @@ function upcomingRowHtml(it, kind) {
         <div class="amount num">${fmtKES(it.amount)}</div>
         ${invoiceToggleButton(it)}
         ${reminderAction(c, kind)}
-        ${kind === 'overdue' && c.plan !== 'one-off'
+        ${kind === 'overdue' && c.plan !== 'one-off' && c.pausable !== 0
           ? (c.subaccount_paused
             ? `<button class="btn-sm" onclick="resumeSubaccount(${c.id})" title="${c.catalog_api_base ? 'Bring their website back online' : 'Resume their GHL subaccount'}">Resume ${c.catalog_api_base ? 'web' : 'sub'}</button>`
             : `<button class="btn-sm danger" onclick="pauseSubaccount(${c.id})" title="${c.catalog_api_base ? 'Take their website offline' : 'Pause their GHL subaccount'}">Pause ${c.catalog_api_base ? 'web' : 'sub'}</button>`)
