@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260701-1';
+const APP_VERSION = '20260701-2';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
 
 // Service catalogue, sourced from essenceautomations.com
@@ -2580,6 +2580,22 @@ function clientFormHtml(c) {
         <p class="hint" style="margin-top:-6px; font-size:10.5px; line-height:1.4; opacity:0.85;">Adds a one-off charge due with the first payment (a scheduled payment on the start date). Mark it paid when they pay it. Skip for clients who dispute the fee.</p>
       </div>
       ` : ''}
+      ${!isEdit ? `
+      <div class="form-section">
+        <div class="form-section-title">Deposit + balance (optional)</div>
+        <div class="form-row">
+          <label>
+            <span>Deposit paid now (Ksh) <span class="hint">part-payment received</span></span>
+            <input type="number" name="deposit" min="0" step="1" placeholder="e.g. 5000">
+          </label>
+          <label>
+            <span>Balance due <span class="hint">when the rest is expected</span></span>
+            <input type="date" name="balance_due" value="${addDaysISO(todayISO(), 7)}">
+          </label>
+        </div>
+        <p class="hint" id="depositHint" style="margin-top:-6px; font-size:10.5px; line-height:1.4; opacity:0.85;">Treats the Amount above as the total. The deposit is recorded as paid, and the balance (total minus deposit) is tracked and chased on the due date.</p>
+      </div>
+      ` : ''}
       <div class="form-section">
         <div class="form-section-title">Upsell follow-up</div>
         <label>
@@ -2612,6 +2628,31 @@ window.editClient = function (id, opts = {}) {
       const input = f.querySelector(`[name="${k}"]`);
       if (input && opts.prefill[k]) input.value = opts.prefill[k];
     });
+  }
+  // Live deposit → balance readout (add form only).
+  if (!c) {
+    const form = $('#clientForm');
+    const depEl = form.querySelector('[name="deposit"]');
+    const amtEl = form.querySelector('[name="amount"]');
+    const hintEl = form.querySelector('#depositHint');
+    if (depEl && amtEl && hintEl) {
+      const baseHint = hintEl.innerHTML;
+      const upd = () => {
+        const total = Number(amtEl.value) || 0;
+        const dep = Number(depEl.value) || 0;
+        if (dep <= 0) { hintEl.innerHTML = baseHint; hintEl.style.color = ''; return; }
+        const bal = total - dep;
+        if (bal < 0) {
+          hintEl.innerHTML = 'Deposit is more than the total Amount above — raise the Amount.';
+          hintEl.style.color = 'var(--red)';
+        } else {
+          hintEl.innerHTML = `Deposit <b>${fmtKES(dep)}</b> recorded as paid · Balance <b>${fmtKES(bal)}</b> tracked, chased on the due date.`;
+          hintEl.style.color = '';
+        }
+      };
+      depEl.addEventListener('input', upd);
+      amtEl.addEventListener('input', upd);
+    }
   }
   $('#clientForm').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -2659,6 +2700,33 @@ window.editClient = function (id, opts = {}) {
               description: (fd.get('setup_fee_label') || '').trim() || 'Setup fee',
             }),
           });
+        }
+        // Optional deposit → record it as a paid payment and track the remaining
+        // balance as a scheduled payment. "Amount" is the total; balance = total − deposit.
+        const deposit = Number(fd.get('deposit')) || 0;
+        if (deposit > 0 && res && res.client) {
+          await api('/api/payments', {
+            method: 'POST',
+            body: JSON.stringify({
+              client_id: res.client.id,
+              amount: deposit,
+              paid_on: body.start_date,
+              method: body.method || null,
+              notes: 'Deposit',
+            }),
+          });
+          const balance = body.amount - deposit;
+          if (balance > 0) {
+            await api('/api/scheduled-payments', {
+              method: 'POST',
+              body: JSON.stringify({
+                client_id: res.client.id,
+                amount: balance,
+                due_date: fd.get('balance_due') || res.client.next_due || body.start_date,
+                description: `Balance (${fmtKES(balance)} of ${fmtKES(body.amount)})`,
+              }),
+            });
+          }
         }
         if (opts.onCreated && res && res.client) {
           await opts.onCreated(res.client);
