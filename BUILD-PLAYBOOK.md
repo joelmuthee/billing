@@ -132,12 +132,16 @@ created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 
 When a payment is recorded with `scheduled_payment_id` set, the worker marks the scheduled item paid in the same transaction.
 
-**Recording a deposit + balance (there is no separate "deposit" field — use this):**
+**Recording a deposit + balance:**
+
+*New client — use the **Deposit** field in the Add-client form (the easy path).* Put the full total in **Amount**, the part-payment in **Deposit paid now**, and a **Balance due** date (defaults to a week out). On save the form records the deposit as a paid payment and creates the balance (total − deposit) as a scheduled payment. A live readout shows the balance as you type. Add-form only (avoids double-counting on edits).
+
+*Existing client, or by API — the two-step manual pattern:*
 1. Record the deposit as a normal payment (`POST /api/payments`). For a `one-off` client it counts as one-off revenue automatically (`isOneOffChunk` in app.js keys off `plan === 'one-off'` OR a payment that cleared a scheduled item), so no linking is needed.
 2. Add the outstanding balance as a scheduled payment (the **Schedule** action, `POST /api/scheduled-payments`) with `amount` = balance, a `due_date`, and `description` like `Balance (Ksh X of Y)`. It then shows as pending on the client card and gets chased in the daily digest.
 3. When the balance lands, hit **Mark paid** on that scheduled line (`paySchedule` → records a linked payment). Client is fully settled and the full total is booked.
 
-Example: Harrison / TCL Kenya (id 22), Ksh 15,000 one-off — 5,000 deposit recorded as a payment, 10,000 booked as a scheduled balance.
+Either way, the client row shows a live breakdown (`schedBreakdown` in app.js): a "X paid" pill plus each outstanding chunk with its due date. Example: Harrison / TCL Kenya (id 22), Ksh 15,000 one-off — 5,000 deposit + 10,000 scheduled balance.
 
 ### `expenses`
 
