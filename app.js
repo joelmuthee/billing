@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260630-2';
+const APP_VERSION = '20260701-1';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
 
 // Service catalogue, sourced from essenceautomations.com
@@ -1044,6 +1044,32 @@ function renderClientFilter() {
   `;
 }
 
+// Deposit/balance breakdown for a client that has staged (scheduled) payments.
+// Shows what's been paid so far + each outstanding chunk with its due date, so a
+// one-off like "5k deposit, 10k balance" reads at a glance on the client row.
+// Returns '' for clients with no scheduled payments (keeps simple clients clean).
+function schedBreakdown(c) {
+  const sched = state.scheduled_payments.filter((s) => s.client_id === c.id);
+  if (sched.length === 0) return '';
+  const clientPayments = state.payments.filter((p) => p.client_id === c.id);
+  const linkedIds = new Set(sched.filter((s) => s.payment_id).map((s) => s.payment_id));
+  // One-off: every payment is a chunk toward the total. Recurring: only the
+  // payments that cleared a scheduled item count toward the staged total.
+  const paidTotal = c.plan === 'one-off'
+    ? clientPayments.reduce((sum, p) => sum + p.amount, 0)
+    : clientPayments.filter((p) => linkedIds.has(p.id)).reduce((sum, p) => sum + p.amount, 0);
+  const pills = [];
+  if (paidTotal > 0) pills.push(`<span class="badge ok">${fmtKES(paidTotal)} paid</span>`);
+  const pending = sched.filter((s) => !s.paid_on).sort((a, b) => a.due_date.localeCompare(b.due_date));
+  for (const s of pending) {
+    const late = s.due_date < todayISO();
+    const label = (s.description || 'Balance').replace(/\s*\(.*\)\s*$/, '').trim() || 'Balance';
+    pills.push(`<span class="badge ${late ? 'danger' : 'warn'}">${escapeHtml(label)} ${fmtKES(s.amount)} · ${late ? 'overdue' : 'due'} ${fmtDate(s.due_date)}</span>`);
+  }
+  if (pills.length === 0) return '';
+  return `<div class="sub" style="margin-top:3px;">${pills.join(' ')}</div>`;
+}
+
 function renderClientsList() {
   renderClientsKpis();
   renderClientFilter();
@@ -1098,6 +1124,7 @@ function renderClientsList() {
             ${c.referred_by ? `<span class="muted-2">referred by ${escapeHtml(clientNameById(c.referred_by))}</span>` : ''}
           </div>
           ${chips ? `<div class="chips">${chips}</div>` : ''}
+          ${schedBreakdown(c)}
         </div>
         <div class="actions">
           <div class="amount num">${fmtKES(c.amount)}</div>
