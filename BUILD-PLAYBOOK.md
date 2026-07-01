@@ -132,6 +132,13 @@ created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 
 When a payment is recorded with `scheduled_payment_id` set, the worker marks the scheduled item paid in the same transaction.
 
+**Recording a deposit + balance (there is no separate "deposit" field — use this):**
+1. Record the deposit as a normal payment (`POST /api/payments`). For a `one-off` client it counts as one-off revenue automatically (`isOneOffChunk` in app.js keys off `plan === 'one-off'` OR a payment that cleared a scheduled item), so no linking is needed.
+2. Add the outstanding balance as a scheduled payment (the **Schedule** action, `POST /api/scheduled-payments`) with `amount` = balance, a `due_date`, and `description` like `Balance (Ksh X of Y)`. It then shows as pending on the client card and gets chased in the daily digest.
+3. When the balance lands, hit **Mark paid** on that scheduled line (`paySchedule` → records a linked payment). Client is fully settled and the full total is booked.
+
+Example: Harrison / TCL Kenya (id 22), Ksh 15,000 one-off — 5,000 deposit recorded as a payment, 10,000 booked as a scheduled balance.
+
 ### `expenses`
 
 Recurring (GHL, Claude, rent) or one-off (printer toner).
