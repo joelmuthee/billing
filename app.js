@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260701-2';
+const APP_VERSION = '20260703-1';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
 
 // Service catalogue, sourced from essenceautomations.com
@@ -1332,7 +1332,11 @@ function expenseRowHtml(e, nested) {
           ${e.tag ? `<span class="badge" style="background:var(--brand-orange-soft);color:var(--brand-orange-deep);">${escapeHtml(e.tag)}</span>` : ''}
           ${e.status !== 'active' ? `<span class="badge muted">${e.status}</span>` : ''}
           ${overdue ? `<span class="badge danger">Overdue</span>` : ''}
-          ${e.next_due ? `<span>Next due ${fmtDate(e.next_due)}</span>` : `<span>${e.plan === 'one-off' ? 'One off' : 'No due date'}</span>`}
+          ${e.next_due
+            ? `<span>Next due ${fmtDate(e.next_due)}</span>`
+            : (e.plan === 'one-off'
+              ? (e.start_date ? `<span>${fmtDate(e.start_date)}</span>` : '')
+              : `<span>No due date</span>`)}
         </div>
       </div>
       <div class="actions">
@@ -2442,6 +2446,51 @@ function sourceFieldsHtml(entity) {
   `;
 }
 
+// Deposit + balance section for the client form. On Add — or on Edit of a client
+// that has NO staged payments yet — it's an input pair (deposit + balance due),
+// wired on save to record the deposit as paid and schedule the balance. On Edit of
+// a client that already has staged payments (e.g. a deposit was taken), it's a
+// read-only summary instead, so saving never double-records.
+function depositSectionHtml(c) {
+  const isEdit = !!c;
+  const existing = isEdit ? state.scheduled_payments.filter((s) => s.client_id === c.id) : [];
+  if (isEdit && existing.length) {
+    const clientPayments = state.payments.filter((p) => p.client_id === c.id);
+    const linkedIds = new Set(existing.filter((s) => s.payment_id).map((s) => s.payment_id));
+    const paid = c.plan === 'one-off'
+      ? clientPayments.reduce((s, p) => s + p.amount, 0)
+      : clientPayments.filter((p) => linkedIds.has(p.id)).reduce((s, p) => s + p.amount, 0);
+    const rows = existing.slice().sort((a, b) => a.due_date.localeCompare(b.due_date)).map((s) => {
+      const late = !s.paid_on && s.due_date < todayISO();
+      const label = (s.description || 'Balance').replace(/\s*\(.*\)\s*$/, '').trim() || 'Balance';
+      const when = s.paid_on ? `paid ${fmtDate(s.paid_on)}` : `${late ? 'overdue' : 'due'} ${fmtDate(s.due_date)}`;
+      return `<div style="margin:3px 0;"><span class="badge ${s.paid_on ? 'ok' : (late ? 'danger' : 'warn')}">${escapeHtml(label)} ${fmtKES(s.amount)} · ${when}</span></div>`;
+    }).join('');
+    return `
+      <div class="form-section">
+        <div class="form-section-title">Deposit + balance</div>
+        <div><span class="badge ok">${fmtKES(paid)} paid so far</span></div>
+        ${rows}
+        <p class="hint" style="margin-top:5px; font-size:10.5px; line-height:1.4; opacity:0.85;">Add another chunk with <b>+ Schedule payment</b> below. Settle a balance by marking it paid from the client row or dashboard.</p>
+      </div>`;
+  }
+  return `
+    <div class="form-section">
+      <div class="form-section-title">Deposit + balance (optional)</div>
+      <div class="form-row">
+        <label>
+          <span>Deposit paid now (Ksh) <span class="hint">part-payment received</span></span>
+          <input type="number" name="deposit" min="0" step="1" placeholder="e.g. 5000">
+        </label>
+        <label>
+          <span>Balance due <span class="hint">when the rest is expected</span></span>
+          <input type="date" name="balance_due" value="${addDaysISO(todayISO(), 7)}">
+        </label>
+      </div>
+      <p class="hint" id="depositHint" style="margin-top:-6px; font-size:10.5px; line-height:1.4; opacity:0.85;">Treats the Amount above as the total. The deposit is recorded as paid, and the balance (total minus deposit) is tracked and chased on the due date.</p>
+    </div>`;
+}
+
 function clientFormHtml(c) {
   const isEdit = !!c;
   const refOpts = state.clients
@@ -2580,22 +2629,7 @@ function clientFormHtml(c) {
         <p class="hint" style="margin-top:-6px; font-size:10.5px; line-height:1.4; opacity:0.85;">Adds a one-off charge due with the first payment (a scheduled payment on the start date). Mark it paid when they pay it. Skip for clients who dispute the fee.</p>
       </div>
       ` : ''}
-      ${!isEdit ? `
-      <div class="form-section">
-        <div class="form-section-title">Deposit + balance (optional)</div>
-        <div class="form-row">
-          <label>
-            <span>Deposit paid now (Ksh) <span class="hint">part-payment received</span></span>
-            <input type="number" name="deposit" min="0" step="1" placeholder="e.g. 5000">
-          </label>
-          <label>
-            <span>Balance due <span class="hint">when the rest is expected</span></span>
-            <input type="date" name="balance_due" value="${addDaysISO(todayISO(), 7)}">
-          </label>
-        </div>
-        <p class="hint" id="depositHint" style="margin-top:-6px; font-size:10.5px; line-height:1.4; opacity:0.85;">Treats the Amount above as the total. The deposit is recorded as paid, and the balance (total minus deposit) is tracked and chased on the due date.</p>
-      </div>
-      ` : ''}
+      ${depositSectionHtml(isEdit ? c : null)}
       <div class="form-section">
         <div class="form-section-title">Upsell follow-up</div>
         <label>
@@ -2629,8 +2663,8 @@ window.editClient = function (id, opts = {}) {
       if (input && opts.prefill[k]) input.value = opts.prefill[k];
     });
   }
-  // Live deposit → balance readout (add form only).
-  if (!c) {
+  // Live deposit → balance readout (whenever the deposit input is present).
+  {
     const form = $('#clientForm');
     const depEl = form.querySelector('[name="deposit"]');
     const amtEl = form.querySelector('[name="amount"]');
@@ -2682,10 +2716,11 @@ window.editClient = function (id, opts = {}) {
       free_months: Math.max(0, Number(fd.get('free_months')) || 0),
     };
     try {
+      let res = null;
       if (c) {
         await api(`/api/clients/${c.id}`, { method: 'PUT', body: JSON.stringify(body) });
       } else {
-        const res = await api('/api/clients', { method: 'POST', body: JSON.stringify(body) });
+        res = await api('/api/clients', { method: 'POST', body: JSON.stringify(body) });
         // Optional one-off setup fee → create a scheduled payment due with the
         // first recurring payment (the new client's next_due, which defaults to
         // start_date). Only on create; skipped if left blank.
@@ -2701,35 +2736,39 @@ window.editClient = function (id, opts = {}) {
             }),
           });
         }
-        // Optional deposit → record it as a paid payment and track the remaining
-        // balance as a scheduled payment. "Amount" is the total; balance = total − deposit.
-        const deposit = Number(fd.get('deposit')) || 0;
-        if (deposit > 0 && res && res.client) {
-          await api('/api/payments', {
-            method: 'POST',
-            body: JSON.stringify({
-              client_id: res.client.id,
-              amount: deposit,
-              paid_on: body.start_date,
-              method: body.method || null,
-              notes: 'Deposit',
-            }),
-          });
-          const balance = body.amount - deposit;
-          if (balance > 0) {
-            await api('/api/scheduled-payments', {
-              method: 'POST',
-              body: JSON.stringify({
-                client_id: res.client.id,
-                amount: balance,
-                due_date: fd.get('balance_due') || res.client.next_due || body.start_date,
-                description: `Balance (${fmtKES(balance)} of ${fmtKES(body.amount)})`,
-              }),
-            });
-          }
-        }
         if (opts.onCreated && res && res.client) {
           await opts.onCreated(res.client);
+        }
+      }
+      // Optional deposit → record it as a paid payment and track the remaining
+      // balance as a scheduled payment. Fires for a new client, or an existing one
+      // with NO staged payments yet (the input only renders in those cases, so we
+      // never double-record). "Amount" is the total; balance = total − deposit.
+      const savedClient = c || (res && res.client);
+      const deposit = Number(fd.get('deposit')) || 0;
+      const alreadyStaged = savedClient && state.scheduled_payments.some((s) => s.client_id === savedClient.id);
+      if (deposit > 0 && savedClient && !alreadyStaged) {
+        await api('/api/payments', {
+          method: 'POST',
+          body: JSON.stringify({
+            client_id: savedClient.id,
+            amount: deposit,
+            paid_on: body.start_date,
+            method: body.method || null,
+            notes: 'Deposit',
+          }),
+        });
+        const balance = body.amount - deposit;
+        if (balance > 0) {
+          await api('/api/scheduled-payments', {
+            method: 'POST',
+            body: JSON.stringify({
+              client_id: savedClient.id,
+              amount: balance,
+              due_date: fd.get('balance_due') || savedClient.next_due || body.start_date,
+              description: `Balance (${fmtKES(balance)} of ${fmtKES(body.amount)})`,
+            }),
+          });
         }
       }
       await loadData();
