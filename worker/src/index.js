@@ -392,6 +392,28 @@ export default {
         )
           .bind(body.paid_on, paymentId, body.scheduled_payment_id, body.client_id)
           .run();
+      } else if (client.plan === "one-off") {
+        // A standalone payment on a one-off client draws down its outstanding
+        // balance chunks (oldest first): a partial payment reduces the chunk so
+        // the remaining balance is right; a payment that fully covers a chunk
+        // marks it paid. Without this a 5k payment against a 10k balance would
+        // leave the balance sitting at 10k (paid + balance no longer = total).
+        const openRs = await env.DB.prepare(
+          "SELECT id, amount FROM scheduled_payments WHERE client_id = ? AND paid_on IS NULL ORDER BY due_date ASC, id ASC"
+        ).bind(body.client_id).all();
+        let remaining = Math.round(body.amount);
+        for (const s of (openRs.results || [])) {
+          if (remaining <= 0) break;
+          if (remaining >= s.amount) {
+            await env.DB.prepare("UPDATE scheduled_payments SET paid_on = ?, payment_id = ? WHERE id = ?")
+              .bind(body.paid_on, paymentId, s.id).run();
+            remaining -= s.amount;
+          } else {
+            await env.DB.prepare("UPDATE scheduled_payments SET amount = amount - ?, description = 'Balance (part-paid)' WHERE id = ?")
+              .bind(remaining, s.id).run();
+            remaining = 0;
+          }
+        }
       }
 
       // Advance client.next_due (or mark one-off completed only if no unpaid scheduled remain)
