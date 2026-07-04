@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260704-1';
+const APP_VERSION = '20260704-2';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
 
 // Service catalogue, sourced from essenceautomations.com
@@ -1252,6 +1252,33 @@ window.paySchedule = function (scheduledId) {
   recordPayment(c.id, { amount: scheduledOutstanding(s), scheduled_payment_id: s.id, reference: s.description || '' });
 };
 
+// Change a balance chunk's due date (from the client's Edit form). The PUT wants
+// the whole row, so we keep amount/description/notes and only swap the date.
+window.updateSchedDate = async function (scheduledId) {
+  const s = state.scheduled_payments.find((x) => x.id === scheduledId);
+  if (!s) return;
+  const input = document.getElementById('balDue_' + scheduledId);
+  const newDate = input && input.value;
+  if (!newDate || newDate === s.due_date) return;
+  try {
+    await api(`/api/scheduled-payments/${scheduledId}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        client_id: s.client_id,
+        amount: s.amount,
+        due_date: newDate,
+        description: s.description || null,
+        notes: s.notes || null,
+      }),
+    });
+    await loadData();
+    toast('Balance due date updated');
+    editClient(s.client_id); // reopen the edit form with the refreshed date
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+};
+
 // Date window for the Payments tab period toggle.
 function paymentsPeriodBounds() {
   const today = todayISO();
@@ -2494,10 +2521,16 @@ function depositSectionHtml(c) {
       paid = clientPayments.reduce((s, p) => s + p.amount, 0);
       const outstanding = Math.max(0, (c.amount || 0) - paid);
       const open = existing.filter((s) => !s.paid_on).sort((a, b) => a.due_date.localeCompare(b.due_date));
-      const due = open.length ? open[0].due_date : null;
-      const late = due && due < todayISO();
+      const bal = open.length ? open[0] : null;
+      const late = bal && bal.due_date < todayISO();
       rows = outstanding > 0
-        ? `<div style="margin:3px 0;"><span class="badge ${late ? 'danger' : 'warn'}">Balance ${fmtKES(outstanding)}${due ? ` · ${late ? 'overdue' : 'due'} ${fmtDate(due)}` : ''}</span></div>`
+        ? `<div style="margin:6px 0; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+            <span class="badge ${late ? 'danger' : 'warn'}">Balance ${fmtKES(outstanding)}</span>
+            ${bal ? `<label style="display:flex; align-items:center; gap:6px; font-size:12px; color:var(--muted);">due
+              <input type="date" id="balDue_${bal.id}" value="${bal.due_date}" style="padding:4px 6px; font-size:12px; width:auto;">
+            </label>
+            <button type="button" class="btn-sm" onclick="updateSchedDate(${bal.id})">Update date</button>` : ''}
+          </div>`
         : `<div style="margin:3px 0;"><span class="badge ok">fully paid</span></div>`;
     } else {
       const linkedIds = new Set(existing.filter((s) => s.payment_id).map((s) => s.payment_id));
