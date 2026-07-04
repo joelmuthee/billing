@@ -3,6 +3,9 @@
 # brittle to ride a 4-hour browser cache. Files are tiny, refetch cost is
 # negligible.
 
+/
+  Cache-Control: no-cache, must-revalidate
+
 /index.html
   Cache-Control: no-cache, must-revalidate
 

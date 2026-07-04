@@ -392,45 +392,28 @@ export default {
         )
           .bind(body.paid_on, paymentId, body.scheduled_payment_id, body.client_id)
           .run();
-      } else if (client.plan === "one-off") {
-        // A standalone payment on a one-off client draws down its outstanding
-        // balance chunks (oldest first): a partial payment reduces the chunk so
-        // the remaining balance is right; a payment that fully covers a chunk
-        // marks it paid. Without this a 5k payment against a 10k balance would
-        // leave the balance sitting at 10k (paid + balance no longer = total).
-        const openRs = await env.DB.prepare(
-          "SELECT id, amount FROM scheduled_payments WHERE client_id = ? AND paid_on IS NULL ORDER BY due_date ASC, id ASC"
-        ).bind(body.client_id).all();
-        let remaining = Math.round(body.amount);
-        for (const s of (openRs.results || [])) {
-          if (remaining <= 0) break;
-          if (remaining >= s.amount) {
-            await env.DB.prepare("UPDATE scheduled_payments SET paid_on = ?, payment_id = ? WHERE id = ?")
-              .bind(body.paid_on, paymentId, s.id).run();
-            remaining -= s.amount;
-          } else {
-            await env.DB.prepare("UPDATE scheduled_payments SET amount = amount - ?, description = 'Balance (part-paid)' WHERE id = ?")
-              .bind(remaining, s.id).run();
-            remaining = 0;
-          }
-        }
       }
 
-      // Advance client.next_due (or mark one-off completed only if no unpaid scheduled remain)
+      // Advance client.next_due; reactivate a paused recurring client who paid.
       const newNextDue = bumpNextDue(client.plan, client.next_due, body.paid_on);
       let newStatus = client.status;
-      // A suspended (paused) recurring client who just paid gets reactivated.
       if (client.plan !== "one-off" && client.status === "paused") {
         newStatus = "active";
       }
       if (client.plan === "one-off") {
-        const remainingRs = await env.DB.prepare(
-          "SELECT COUNT(*) AS n FROM scheduled_payments WHERE client_id = ? AND paid_on IS NULL"
+        // A one-off's outstanding balance is ALWAYS derived (total amount − sum of
+        // payments), never stored/mutated, so it can't drift on add/delete. When
+        // cumulative payments cover the full amount, clear any open balance chunks
+        // and mark the client completed.
+        const paidRs = await env.DB.prepare(
+          "SELECT COALESCE(SUM(amount), 0) AS paid FROM payments WHERE client_id = ?"
         ).bind(body.client_id).first();
-        const remaining = remainingRs ? remainingRs.n : 0;
-        if (remaining === 0) {
+        const paidSoFar = paidRs ? paidRs.paid : 0;
+        if ((client.amount || 0) > 0 && paidSoFar >= client.amount) {
+          await env.DB.prepare(
+            "UPDATE scheduled_payments SET paid_on = ?, payment_id = COALESCE(payment_id, ?) WHERE client_id = ? AND paid_on IS NULL"
+          ).bind(body.paid_on, paymentId, body.client_id).run();
           newStatus = "completed";
-          // Suggest a 3-month upsell follow-up if not already set
           const existing = await env.DB.prepare(
             "SELECT upsell_followup_date FROM clients WHERE id = ?"
           ).bind(body.client_id).first();
@@ -890,11 +873,18 @@ async function runOverdueDigest(env) {
   const overdue = clients.filter((c) => c.next_due < today);
   const dueSoon = clients.filter((c) => c.next_due >= today && c.next_due <= in3);
 
-  // Unpaid scheduled payments (deposit/balance) that are overdue or due soon
+  // Unpaid scheduled payments (deposit/balance) that are overdue or due soon.
   const sp = await env.DB.prepare(
-    "SELECT s.*, c.name AS client_name FROM scheduled_payments s JOIN clients c ON c.id = s.client_id WHERE s.paid_on IS NULL ORDER BY s.due_date ASC"
+    "SELECT s.*, c.name AS client_name, c.plan AS client_plan, c.amount AS client_amount, (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE client_id = c.id) AS client_paid FROM scheduled_payments s JOIN clients c ON c.id = s.client_id WHERE s.paid_on IS NULL ORDER BY s.due_date ASC"
   ).all();
-  const scheduled = sp.results || [];
+  let scheduled = sp.results || [];
+  // A one-off's balance is derived (total − everything paid). Overwrite the stored
+  // chunk amount with the live outstanding so the digest never shows a stale figure,
+  // and drop chunks that are already fully covered.
+  for (const s of scheduled) {
+    if (s.client_plan === "one-off") s.amount = Math.max(0, (s.client_amount || 0) - (s.client_paid || 0));
+  }
+  scheduled = scheduled.filter((s) => s.amount > 0);
   const schedOverdue = scheduled.filter((s) => s.due_date < today);
   const schedSoon = scheduled.filter((s) => s.due_date >= today && s.due_date <= in3);
 

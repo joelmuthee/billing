@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260703-1';
+const APP_VERSION = '20260704-1';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
 
 // Service catalogue, sourced from essenceautomations.com
@@ -331,10 +331,12 @@ function upcomingItems() {
     if (s.paid_on) continue;
     const c = state.clients.find((x) => x.id === s.client_id);
     if (!c) continue;
+    const outstanding = scheduledOutstanding(s); // derived for one-off, stored otherwise
+    if (outstanding <= 0) continue;              // one-off already settled
     items.push({
       kind: 'scheduled',
       due: s.due_date,
-      amount: s.amount,
+      amount: outstanding,
       client: c,
       scheduled: s,
       label: s.description || 'Scheduled payment',
@@ -1048,17 +1050,46 @@ function renderClientFilter() {
 // Shows what's been paid so far + each outstanding chunk with its due date, so a
 // one-off like "5k deposit, 10k balance" reads at a glance on the client row.
 // Returns '' for clients with no scheduled payments (keeps simple clients clean).
+// Live outstanding for a single scheduled chunk. A one-off client's balance is
+// derived from its total minus everything paid (never stored), so it self-corrects
+// on any add/delete. Recurring build-fee chunks keep their own stored amount.
+function scheduledOutstanding(s) {
+  const c = state.clients.find((x) => x.id === s.client_id);
+  if (c && c.plan === 'one-off') {
+    const paid = state.payments.filter((p) => p.client_id === c.id).reduce((a, p) => a + p.amount, 0);
+    return Math.max(0, (c.amount || 0) - paid);
+  }
+  return s.amount;
+}
+
 function schedBreakdown(c) {
   const sched = state.scheduled_payments.filter((s) => s.client_id === c.id);
   if (sched.length === 0) return '';
   const clientPayments = state.payments.filter((p) => p.client_id === c.id);
-  const linkedIds = new Set(sched.filter((s) => s.payment_id).map((s) => s.payment_id));
-  // One-off: every payment is a chunk toward the total. Recurring: only the
-  // payments that cleared a scheduled item count toward the staged total.
-  const paidTotal = c.plan === 'one-off'
-    ? clientPayments.reduce((sum, p) => sum + p.amount, 0)
-    : clientPayments.filter((p) => linkedIds.has(p.id)).reduce((sum, p) => sum + p.amount, 0);
   const pills = [];
+
+  if (c.plan === 'one-off') {
+    // Derived: paid = everything received; balance = total − paid. Can't desync.
+    const paid = clientPayments.reduce((sum, p) => sum + p.amount, 0);
+    const outstanding = Math.max(0, (c.amount || 0) - paid);
+    if (paid > 0) pills.push(`<span class="badge ok">${fmtKES(paid)} paid</span>`);
+    if (outstanding > 0) {
+      const open = sched.filter((s) => !s.paid_on).sort((a, b) => a.due_date.localeCompare(b.due_date));
+      const due = open.length ? open[0].due_date : null;
+      const late = due && due < todayISO();
+      const when = due ? ` · ${late ? 'overdue' : 'due'} ${fmtDate(due)}` : '';
+      pills.push(`<span class="badge ${late ? 'danger' : 'warn'}">Balance ${fmtKES(outstanding)}${when}</span>`);
+    } else if (paid > 0) {
+      pills.push(`<span class="badge ok">fully paid</span>`);
+    }
+    if (pills.length === 0) return '';
+    return `<div class="sub" style="margin-top:3px;">${pills.join(' ')}</div>`;
+  }
+
+  // Recurring client with a one-off build chunk: only payments that cleared a
+  // scheduled item count as "paid"; each open chunk keeps its stored amount.
+  const linkedIds = new Set(sched.filter((s) => s.payment_id).map((s) => s.payment_id));
+  const paidTotal = clientPayments.filter((p) => linkedIds.has(p.id)).reduce((sum, p) => sum + p.amount, 0);
   if (paidTotal > 0) pills.push(`<span class="badge ok">${fmtKES(paidTotal)} paid</span>`);
   const pending = sched.filter((s) => !s.paid_on).sort((a, b) => a.due_date.localeCompare(b.due_date));
   for (const s of pending) {
@@ -1216,8 +1247,9 @@ window.paySchedule = function (scheduledId) {
   if (!s) return;
   const c = state.clients.find((x) => x.id === s.client_id);
   if (!c) return;
-  // Re-use the payment modal but pre-fill from the scheduled item
-  recordPayment(c.id, { amount: s.amount, scheduled_payment_id: s.id, reference: s.description || '' });
+  // Re-use the payment modal but pre-fill from the scheduled item (derived
+  // outstanding for a one-off, so it's the live remaining balance not a stale figure).
+  recordPayment(c.id, { amount: scheduledOutstanding(s), scheduled_payment_id: s.id, reference: s.description || '' });
 };
 
 // Date window for the Payments tab period toggle.
@@ -2456,16 +2488,27 @@ function depositSectionHtml(c) {
   const existing = isEdit ? state.scheduled_payments.filter((s) => s.client_id === c.id) : [];
   if (isEdit && existing.length) {
     const clientPayments = state.payments.filter((p) => p.client_id === c.id);
-    const linkedIds = new Set(existing.filter((s) => s.payment_id).map((s) => s.payment_id));
-    const paid = c.plan === 'one-off'
-      ? clientPayments.reduce((s, p) => s + p.amount, 0)
-      : clientPayments.filter((p) => linkedIds.has(p.id)).reduce((s, p) => s + p.amount, 0);
-    const rows = existing.slice().sort((a, b) => a.due_date.localeCompare(b.due_date)).map((s) => {
-      const late = !s.paid_on && s.due_date < todayISO();
-      const label = (s.description || 'Balance').replace(/\s*\(.*\)\s*$/, '').trim() || 'Balance';
-      const when = s.paid_on ? `paid ${fmtDate(s.paid_on)}` : `${late ? 'overdue' : 'due'} ${fmtDate(s.due_date)}`;
-      return `<div style="margin:3px 0;"><span class="badge ${s.paid_on ? 'ok' : (late ? 'danger' : 'warn')}">${escapeHtml(label)} ${fmtKES(s.amount)} · ${when}</span></div>`;
-    }).join('');
+    let paid, rows;
+    if (c.plan === 'one-off') {
+      // Derived balance = total − everything paid (self-correcting).
+      paid = clientPayments.reduce((s, p) => s + p.amount, 0);
+      const outstanding = Math.max(0, (c.amount || 0) - paid);
+      const open = existing.filter((s) => !s.paid_on).sort((a, b) => a.due_date.localeCompare(b.due_date));
+      const due = open.length ? open[0].due_date : null;
+      const late = due && due < todayISO();
+      rows = outstanding > 0
+        ? `<div style="margin:3px 0;"><span class="badge ${late ? 'danger' : 'warn'}">Balance ${fmtKES(outstanding)}${due ? ` · ${late ? 'overdue' : 'due'} ${fmtDate(due)}` : ''}</span></div>`
+        : `<div style="margin:3px 0;"><span class="badge ok">fully paid</span></div>`;
+    } else {
+      const linkedIds = new Set(existing.filter((s) => s.payment_id).map((s) => s.payment_id));
+      paid = clientPayments.filter((p) => linkedIds.has(p.id)).reduce((s, p) => s + p.amount, 0);
+      rows = existing.slice().sort((a, b) => a.due_date.localeCompare(b.due_date)).map((s) => {
+        const late = !s.paid_on && s.due_date < todayISO();
+        const label = (s.description || 'Balance').replace(/\s*\(.*\)\s*$/, '').trim() || 'Balance';
+        const when = s.paid_on ? `paid ${fmtDate(s.paid_on)}` : `${late ? 'overdue' : 'due'} ${fmtDate(s.due_date)}`;
+        return `<div style="margin:3px 0;"><span class="badge ${s.paid_on ? 'ok' : (late ? 'danger' : 'warn')}">${escapeHtml(label)} ${fmtKES(s.amount)} · ${when}</span></div>`;
+      }).join('');
+    }
     return `
       <div class="form-section">
         <div class="form-section-title">Deposit + balance</div>
