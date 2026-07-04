@@ -1000,9 +1000,10 @@ button.filter-pill.active .filter-count {
     margin-top: 10px;
     gap: 0;
     padding-bottom: 4px;
+    flex-wrap: wrap;   /* 6 tabs don't fit one row at phone width — wrap to two rows of three */
   }
   .tab {
-    flex: 1;
+    flex: 1 1 30%;     /* ~3 per row, then wraps; grows to fill the row */
     padding: 8px 6px 10px;
     font-size: 12.5px;
     text-align: center;
