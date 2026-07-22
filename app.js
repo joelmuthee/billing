@@ -5,35 +5,43 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260722-1';
+const APP_VERSION = '20260722-2';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
 
-// Service catalogue, sourced from essenceautomations.com
+// Service catalogue, mirrored from essenceautomations.com — the footer "Services"
+// menu (10 items, each with its own landing page) plus the three Our-Ecosystem
+// entries that aren't in that menu (SEO Content Engine, Email Automation, Smart QR).
+// A `value` is a stable id stored on the client — NEVER rename one that clients
+// already carry, only its label. Retired services live under "Legacy" so existing
+// clients keep their tags instead of silently losing them on the next edit.
 const SERVICES_CATEGORIES = [
   { name: 'Get Found', items: [
-    { value: 'websites', label: 'Website' },
-    { value: 'catalog-website', label: 'Catalogue Website' },
-    { value: 'shopfront-oneoff', label: 'Shopfront (one-off)' },
-    { value: 'gbp-booster', label: 'GBP Booster' },
+    { value: 'websites', label: 'Ultra-modern Websites' },
     { value: 'seo-content', label: 'SEO Content Engine' },
-    { value: 'email-prospecting', label: 'Email Prospecting' },
   ]},
   { name: 'Convert', items: [
-    { value: 'ai-chat', label: 'AI Chat' },
-    { value: 'google-reviews', label: 'Google Reviews' },
-    { value: 'ai-ads', label: 'AI Ads Manager' },
+    { value: 'ai-chat', label: 'AI Support Chat' },
     { value: 'email-automation', label: 'Email Automation' },
   ]},
   { name: 'Retain', items: [
     { value: 'crm', label: 'CRM With App' },
     { value: 'wa-marketing', label: 'WhatsApp Marketing' },
-    { value: 'email-marketing', label: 'Email Marketing' },
-    { value: 'appointment-calendar', label: 'Appointment Calendar' },
+    { value: 'appointment-calendar', label: 'Online Appointment Calendar' },
   ]},
   { name: 'Operate', items: [
+    { value: 'shop-manager', label: 'Shop Manager' },
+    { value: 'hardware-manager', label: 'Hardware Manager' },
+    { value: 'gym-manager', label: 'Gym Manager' },
     { value: 'social-media', label: 'Social Media Management' },
     { value: 'document-management', label: 'Document Management' },
     { value: 'smart-qr', label: 'Smart QR' },
+  ]},
+  // No longer sold, but still tagged on live clients — keep them selectable so
+  // editing those clients doesn't strip the service off their record.
+  { name: 'Legacy (still on some clients)', items: [
+    { value: 'catalog-website', label: 'Catalogue Website' },
+    { value: 'google-reviews', label: 'Google Reviews' },
+    { value: 'ai-ads', label: 'AI Ads Manager' },
   ]},
 ];
 const SERVICE_LABEL = Object.fromEntries(
