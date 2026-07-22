@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260704-2';
+const APP_VERSION = '20260722-1';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
 
 // Service catalogue, sourced from essenceautomations.com
@@ -3190,6 +3190,21 @@ window.recordPayment = function (clientId, opts) {
       notes: (fd.get('notes') || '').trim() || null,
     };
     if (sId) body.scheduled_payment_id = Number(sId);
+    // Double-entry guard. Recording the same payment twice silently advances the
+    // client's next_due by another cycle, which hides for weeks (Joyce's 30 Jun
+    // payment was re-entered on 3 Jul and pushed her from 26 Jul to 26 Aug).
+    // Same client + same amount + same date is the double-entry signal.
+    const dup = state.payments.find((p) => p.client_id === body.client_id && p.amount === body.amount && p.paid_on === body.paid_on);
+    if (dup) {
+      const dc = state.clients.find((x) => x.id === body.client_id);
+      const who = dc ? dc.name : 'this client';
+      const ok = confirm(
+        `${fmtKES(body.amount)} for ${who} on ${fmtDate(body.paid_on)} is already recorded.\n\n` +
+        `Recording it again will push their next due date forward by another cycle. ` +
+        `Only continue if they genuinely paid twice.\n\nRecord anyway?`
+      );
+      if (!ok) return;
+    }
     try {
       await api('/api/payments', { method: 'POST', body: JSON.stringify(body) });
       // A recorded payment brings a suspended catalog back online (best-effort).
