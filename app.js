@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260722-2';
+const APP_VERSION = '20260722-3';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
 
 // Service catalogue, mirrored from essenceautomations.com — the footer "Services"
@@ -39,7 +39,6 @@ const SERVICES_CATEGORIES = [
   // No longer sold, but still tagged on live clients — keep them selectable so
   // editing those clients doesn't strip the service off their record.
   { name: 'Legacy (still on some clients)', items: [
-    { value: 'catalog-website', label: 'Catalogue Website' },
     { value: 'google-reviews', label: 'Google Reviews' },
     { value: 'ai-ads', label: 'AI Ads Manager' },
   ]},
