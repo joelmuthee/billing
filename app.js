@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260722-4';
+const APP_VERSION = '20260722-5';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
 
 // Service catalogue, mirrored from essenceautomations.com — the footer "Services"
@@ -56,6 +56,7 @@ const state = {
   expense_payments: [],
   scheduled_payments: [],
   prospects: [],
+  sms_inbox: [],
   activeTab: 'dashboard',
   revenuePeriod: '30d',
   clientFilter: 'all',
@@ -171,6 +172,7 @@ async function loadData() {
   state.expense_payments = data.expense_payments || [];
   state.scheduled_payments = data.scheduled_payments || [];
   state.prospects = data.prospects || [];
+  state.sms_inbox = data.sms_inbox || [];
   renderAll();
 }
 
@@ -288,6 +290,7 @@ function renderAll() {
   renderOverdue();
   renderUpsellFollowups();
   renderProspectFollowups();
+  renderSmsInbox();
   renderRecent();
   renderClientsList();
   renderProspects();
@@ -3453,6 +3456,59 @@ function renderProspectFollowups() {
     </div>`;
   }).join('');
 }
+
+// Payment-SMS inbox: the ones the auto-matcher couldn't place (unknown sender,
+// ambiguous name). One tap to assign to a client and record, or ignore.
+function renderSmsInbox() {
+  const card = $('#smsInboxCard');
+  const el = $('#smsInboxList');
+  if (!card || !el) return;
+  const items = state.sms_inbox || [];
+  if (items.length === 0) { card.hidden = true; return; }
+  card.hidden = false;
+  const opts = (sel) => state.clients
+    .filter((c) => c.status === 'active')
+    .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+    .map((c) => `<option value="${c.id}" ${c.id === sel ? 'selected' : ''}>${escapeHtml(c.name)}${c.business ? ' · ' + escapeHtml(c.business) : ''}</option>`)
+    .join('');
+  el.innerHTML = items.map((s) => `
+    <div class="list-row">
+      <div>
+        <div class="primary">${fmtKES(s.amount)} <span class="muted-2" style="font-weight:400;">from ${escapeHtml(s.sender_name || 'unknown sender')}</span></div>
+        <div class="sub">
+          <span class="badge muted">${s.source === 'loop' ? 'LOOP' : s.source === 'mpesa' ? 'M-Pesa' : 'SMS'}</span>
+          ${s.paid_on ? `<span>${fmtDate(s.paid_on)}</span>` : ''}
+          ${s.txn_code ? `<span class="mono">${escapeHtml(s.txn_code)}</span>` : ''}
+        </div>
+      </div>
+      <div class="actions" style="flex-wrap:wrap;gap:6px;">
+        <select id="smsClient_${s.id}" style="padding:6px 8px;border:1px solid #e5e5e5;border-radius:8px;font-size:13px;max-width:190px;background:#fff;color:inherit;">
+          <option value="">— pick client —</option>
+          ${opts(s.client_id)}
+        </select>
+        <button class="btn-sm" onclick="assignSms(${s.id})">Record</button>
+        <button class="btn-sm" onclick="ignoreSms(${s.id})">Ignore</button>
+      </div>
+    </div>`).join('');
+}
+window.assignSms = async function (id) {
+  const sel = document.getElementById('smsClient_' + id);
+  const clientId = sel ? Number(sel.value) : 0;
+  if (!clientId) { toast('Pick a client first', 'error'); return; }
+  try {
+    await api(`/api/sms-inbox/${id}/assign`, { method: 'POST', body: JSON.stringify({ client_id: clientId }) });
+    await loadData();
+    toast('Payment recorded');
+  } catch (err) { toast(err.message, 'error'); }
+};
+window.ignoreSms = async function (id) {
+  if (!confirm("Ignore this payment SMS? It won't be recorded (use this for a payment that isn't a client, e.g. a refund or your own transfer).")) return;
+  try {
+    await api(`/api/sms-inbox/${id}/ignore`, { method: 'POST', body: JSON.stringify({}) });
+    await loadData();
+    toast('Ignored');
+  } catch (err) { toast(err.message, 'error'); }
+};
 
 function serializeProspect(p, overrides = {}) {
   return {

@@ -75,6 +75,89 @@ function bumpNextDue(plan, currentNextDue, paidOn) {
   return addMonths(base, periodMonths(plan));
 }
 
+// ─────────── Payment-confirmation SMS: parse, match, record ───────────
+function normSmsDate(s) {
+  const p = String(s).split("/").map((x) => x.trim());
+  if (p.length !== 3) return null;
+  let [d, m, y] = p;
+  if (y.length === 2) y = "20" + y;
+  return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+}
+// Two real formats: LOOP ("You have received KES.X on M-Pesa from NAME on
+// dd/mm/yyyy … M-Pesa Ref, CODE.") and M-Pesa business ("CODE Confirmed.You have
+// received KshX from NAME NUMBER on d/m/yy …"). Returns {amount,name,code,paidOn,source}.
+function parseMpesaSms(text) {
+  const t = (text || "").replace(/\s+/g, " ").trim();
+  const amtM = t.match(/(?:KES|Ksh)\.?\s?([\d,]+(?:\.\d{2})?)/i);
+  const amount = amtM ? Math.round(parseFloat(amtM[1].replace(/,/g, ""))) : null;
+  let name = null, code = null, paidOn = null, source = "unknown";
+  if (/LOOP Ref/i.test(t)) {
+    source = "loop";
+    const m = t.match(/from (.+?) on (\d{1,2}\/\d{1,2}\/\d{2,4})[\s\d:]*\.?.*?M-Pesa Ref,?\s*([A-Z0-9]+)/i);
+    if (m) { name = m[1].trim(); paidOn = normSmsDate(m[2]); code = m[3].toUpperCase(); }
+  } else if (/Confirmed\.?\s*You have received/i.test(t) || /New M-PESA balance/i.test(t)) {
+    source = "mpesa";
+    const cm = t.match(/^([A-Z0-9]{10})\s+Confirmed/i);
+    code = cm ? cm[1].toUpperCase() : null;
+    const m = t.match(/from (.+?)\s+(\d{5,})\s+on\s+(\d{1,2}\/\d{1,2}\/\d{2,4})/i);
+    if (m) { name = m[1].trim(); paidOn = normSmsDate(m[3]); }
+  }
+  return { amount, name, code, paidOn, source };
+}
+const _normName = (s) => String(s || "").toUpperCase().replace(/[^A-Z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+// A client matches when the sender name contains every token of the client's
+// business OR name ("Purity" matches "PURITY WANJA NJIRU"; "Echelon Tactical &
+// Fitness" matches the business). Returns all matching clients.
+function matchClientsByName(senderName, clients) {
+  const sn = _normName(senderName);
+  const set = new Set(sn.split(" ").filter(Boolean));
+  const hits = [];
+  for (const c of clients) {
+    for (const f of [c.business, c.name].filter(Boolean)) {
+      const ft = _normName(f).split(" ").filter(Boolean);
+      if ((ft.length && ft.every((tk) => set.has(tk))) || (_normName(f) && sn.includes(_normName(f)))) {
+        hits.push(c);
+        break;
+      }
+    }
+  }
+  return hits;
+}
+// Record a client payment: insert, mark a linked scheduled item paid, advance
+// next_due (or complete a fully-paid one-off), resume a paused subaccount. Shared
+// by POST /api/payments, SMS auto-record, and inbox assign so all three behave alike.
+async function recordClientPayment(env, body) {
+  const client = await env.DB.prepare("SELECT * FROM clients WHERE id = ?").bind(body.client_id).first();
+  if (!client) return { error: "client not found", status: 404 };
+  const ins = await env.DB.prepare(
+    `INSERT INTO payments (client_id, amount, paid_on, method, reference, notes) VALUES (?, ?, ?, ?, ?, ?)`
+  ).bind(body.client_id, Math.round(body.amount), body.paid_on, body.method || null, body.reference || null, body.notes || null).run();
+  const paymentId = ins.meta.last_row_id;
+  if (Number.isInteger(body.scheduled_payment_id)) {
+    await env.DB.prepare("UPDATE scheduled_payments SET paid_on = ?, payment_id = ? WHERE id = ? AND client_id = ?")
+      .bind(body.paid_on, paymentId, body.scheduled_payment_id, body.client_id).run();
+  }
+  const newNextDue = bumpNextDue(client.plan, client.next_due, body.paid_on);
+  let newStatus = client.status;
+  if (client.plan !== "one-off" && client.status === "paused") newStatus = "active";
+  if (client.plan === "one-off") {
+    const paidRs = await env.DB.prepare("SELECT COALESCE(SUM(amount), 0) AS paid FROM payments WHERE client_id = ?").bind(body.client_id).first();
+    const paidSoFar = paidRs ? paidRs.paid : 0;
+    if ((client.amount || 0) > 0 && paidSoFar >= client.amount) {
+      await env.DB.prepare("UPDATE scheduled_payments SET paid_on = ?, payment_id = COALESCE(payment_id, ?) WHERE client_id = ? AND paid_on IS NULL").bind(body.paid_on, paymentId, body.client_id).run();
+      newStatus = "completed";
+      const ex = await env.DB.prepare("SELECT upsell_followup_date FROM clients WHERE id = ?").bind(body.client_id).first();
+      if (ex && !ex.upsell_followup_date) {
+        await env.DB.prepare("UPDATE clients SET upsell_followup_date = ? WHERE id = ?").bind(addMonths(body.paid_on, 2), body.client_id).run();
+      }
+    }
+  }
+  await env.DB.prepare("UPDATE clients SET next_due = ?, status = ?, subaccount_paused = NULL WHERE id = ?").bind(newNextDue, newStatus, body.client_id).run();
+  const payment = await env.DB.prepare("SELECT * FROM payments WHERE id = ?").bind(paymentId).first();
+  const updatedClient = await env.DB.prepare("SELECT * FROM clients WHERE id = ?").bind(body.client_id).first();
+  return { payment, client: updatedClient };
+}
+
 async function readBody(req) {
   try {
     return await req.json();
@@ -247,6 +330,7 @@ export default {
       const expensePayments = await env.DB.prepare("SELECT * FROM expense_payments ORDER BY paid_on DESC, id DESC").all();
       const scheduled = await env.DB.prepare("SELECT * FROM scheduled_payments ORDER BY due_date ASC").all();
       const prospects = await env.DB.prepare("SELECT * FROM prospects ORDER BY created_at DESC").all();
+      const smsInbox = await env.DB.prepare("SELECT * FROM sms_payments WHERE status = 'pending' ORDER BY created_at DESC").all();
       const clients = (clientsRs.results || []).map((c) => ({
         ...c,
         services: parseServices(c.services),
@@ -258,6 +342,7 @@ export default {
         expense_payments: expensePayments.results || [],
         scheduled_payments: scheduled.results || [],
         prospects: prospects.results || [],
+        sms_inbox: smsInbox.results || [],
       });
     }
 
@@ -366,73 +451,10 @@ export default {
       const err = validatePayment(body);
       if (err) return json({ error: err }, 400);
 
-      const client = await env.DB.prepare("SELECT * FROM clients WHERE id = ?").bind(body.client_id).first();
-      if (!client) return json({ error: "client not found" }, 404);
-
-      // Insert payment
-      const insertResult = await env.DB.prepare(
-        `INSERT INTO payments (client_id, amount, paid_on, method, reference, notes)
-         VALUES (?, ?, ?, ?, ?, ?)`
-      )
-        .bind(
-          body.client_id,
-          Math.round(body.amount),
-          body.paid_on,
-          body.method || null,
-          body.reference || null,
-          body.notes || null
-        )
-        .run();
-      const paymentId = insertResult.meta.last_row_id;
-
-      // If linked to a scheduled payment, mark it paid
-      if (Number.isInteger(body.scheduled_payment_id)) {
-        await env.DB.prepare(
-          "UPDATE scheduled_payments SET paid_on = ?, payment_id = ? WHERE id = ? AND client_id = ?"
-        )
-          .bind(body.paid_on, paymentId, body.scheduled_payment_id, body.client_id)
-          .run();
-      }
-
-      // Advance client.next_due; reactivate a paused recurring client who paid.
-      const newNextDue = bumpNextDue(client.plan, client.next_due, body.paid_on);
-      let newStatus = client.status;
-      if (client.plan !== "one-off" && client.status === "paused") {
-        newStatus = "active";
-      }
-      if (client.plan === "one-off") {
-        // A one-off's outstanding balance is ALWAYS derived (total amount − sum of
-        // payments), never stored/mutated, so it can't drift on add/delete. When
-        // cumulative payments cover the full amount, clear any open balance chunks
-        // and mark the client completed.
-        const paidRs = await env.DB.prepare(
-          "SELECT COALESCE(SUM(amount), 0) AS paid FROM payments WHERE client_id = ?"
-        ).bind(body.client_id).first();
-        const paidSoFar = paidRs ? paidRs.paid : 0;
-        if ((client.amount || 0) > 0 && paidSoFar >= client.amount) {
-          await env.DB.prepare(
-            "UPDATE scheduled_payments SET paid_on = ?, payment_id = COALESCE(payment_id, ?) WHERE client_id = ? AND paid_on IS NULL"
-          ).bind(body.paid_on, paymentId, body.client_id).run();
-          newStatus = "completed";
-          const existing = await env.DB.prepare(
-            "SELECT upsell_followup_date FROM clients WHERE id = ?"
-          ).bind(body.client_id).first();
-          if (existing && !existing.upsell_followup_date) {
-            const followup = addMonths(body.paid_on, 2);
-            await env.DB.prepare("UPDATE clients SET upsell_followup_date = ? WHERE id = ?")
-              .bind(followup, body.client_id).run();
-          }
-        }
-      }
-      // Recording a payment also resumes a paused GHL subaccount (they've paid).
-      await env.DB.prepare("UPDATE clients SET next_due = ?, status = ?, subaccount_paused = NULL WHERE id = ?")
-        .bind(newNextDue, newStatus, body.client_id)
-        .run();
-
-      const payment = await env.DB.prepare("SELECT * FROM payments WHERE id = ?").bind(paymentId).first();
-      const updatedClient = await env.DB.prepare("SELECT * FROM clients WHERE id = ?").bind(body.client_id).first();
+      const res = await recordClientPayment(env, body);
+      if (res.error) return json({ error: res.error }, res.status || 400);
       // The browser restores the catalog after recording a payment (worker→worker blocked by CF 1042).
-      return json({ payment, client: updatedClient }, 201);
+      return json({ payment: res.payment, client: res.client }, 201);
     }
 
     const paymentMatch = path.match(/^\/api\/payments\/(\d+)$/);
@@ -440,6 +462,68 @@ export default {
       const id = Number(paymentMatch[1]);
       await env.DB.prepare("DELETE FROM payments WHERE id = ?").bind(id).run();
       return json({ ok: true });
+    }
+
+    // ─────────── Payment SMS ingest (from the phone forwarder) ───────────
+    if (request.method === "POST" && path === "/api/mpesa-sms") {
+      if (!isAuthed(request, env)) return json({ error: "unauthorized" }, 401);
+      const body = await readBody(request);
+      const text = body && (body.text || body.message || body.sms);
+      if (!text) return json({ error: "no text" }, 400);
+      const parsed = parseMpesaSms(text);
+      const dedupKey = parsed.code || _normName(text).slice(0, 60);
+      const seen = await env.DB.prepare("SELECT id FROM sms_payments WHERE txn_code = ?").bind(dedupKey).first();
+      const alsoPaid = parsed.code ? await env.DB.prepare("SELECT id FROM payments WHERE reference = ?").bind(parsed.code).first() : null;
+      if (seen || alsoPaid) return json({ status: "duplicate", txn_code: dedupKey });
+      const clientsRs = await env.DB.prepare("SELECT id, name, business, plan, status, amount FROM clients WHERE status = 'active'").all();
+      const matches = matchClientsByName(parsed.name || "", clientsRs.results || []);
+      const unique = matches.length === 1 ? matches[0] : null;
+      // Auto-record only a confident, UNIQUE match on a recurring client. One-off
+      // deposits/balances and ambiguous/unknown senders drop to the review inbox.
+      const autoOk = !!(unique && parsed.amount > 0 && parsed.paidOn && unique.plan !== "one-off");
+      if (body.test) {
+        return json({ status: autoOk ? "would-record" : "would-review", parsed, matchCount: matches.length, client: unique ? { id: unique.id, name: unique.name } : null });
+      }
+      const clientId = unique ? unique.id : null;
+      let paymentId = null, finalStatus = "pending";
+      if (autoOk) {
+        const rec = await recordClientPayment(env, {
+          client_id: unique.id, amount: parsed.amount, paid_on: parsed.paidOn,
+          method: "mpesa", reference: parsed.code,
+          notes: `Auto from ${parsed.source === "loop" ? "LOOP" : "M-Pesa"} SMS · ${parsed.name}`,
+        });
+        if (!rec.error) { paymentId = rec.payment.id; finalStatus = "recorded"; }
+      }
+      await env.DB.prepare(
+        `INSERT OR IGNORE INTO sms_payments (raw, amount, sender_name, txn_code, paid_on, source, status, client_id, payment_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(text, parsed.amount, parsed.name, dedupKey, parsed.paidOn, parsed.source, finalStatus, clientId, paymentId).run();
+      return json({ status: finalStatus, parsed, client: unique ? { id: unique.id, name: unique.name } : null, matchCount: matches.length });
+    }
+
+    // Inbox actions: assign a pending SMS to a client (records it) or ignore it.
+    const smsMatch = path.match(/^\/api\/sms-inbox\/(\d+)\/(assign|ignore)$/);
+    if (smsMatch && request.method === "POST") {
+      if (!isAuthed(request, env)) return json({ error: "unauthorized" }, 401);
+      const id = Number(smsMatch[1]); const action = smsMatch[2];
+      const row = await env.DB.prepare("SELECT * FROM sms_payments WHERE id = ?").bind(id).first();
+      if (!row) return json({ error: "not found" }, 404);
+      if (row.status === "recorded") return json({ error: "already recorded" }, 409);
+      if (action === "ignore") {
+        await env.DB.prepare("UPDATE sms_payments SET status = 'ignored' WHERE id = ?").bind(id).run();
+        return json({ ok: true, status: "ignored" });
+      }
+      const b = await readBody(request);
+      const clientId = Number(b && b.client_id);
+      if (!Number.isInteger(clientId)) return json({ error: "client_id required" }, 400);
+      if (!row.amount) return json({ error: "no amount was parsed from this SMS — record it manually" }, 400);
+      const rec = await recordClientPayment(env, {
+        client_id: clientId, amount: row.amount, paid_on: row.paid_on || new Date().toISOString().slice(0, 10),
+        method: "mpesa", reference: row.txn_code, notes: `From ${row.source === "loop" ? "LOOP" : "M-Pesa"} SMS · ${row.sender_name || ""}`,
+      });
+      if (rec.error) return json({ error: rec.error }, rec.status || 400);
+      await env.DB.prepare("UPDATE sms_payments SET status = 'recorded', client_id = ?, payment_id = ? WHERE id = ?").bind(clientId, rec.payment.id, id).run();
+      return json({ ok: true, status: "recorded", payment: rec.payment, client: rec.client });
     }
 
     // ─────────── Invoice toggle ───────────
