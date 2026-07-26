@@ -471,6 +471,10 @@ export default {
       const text = body && (body.text || body.message || body.sms);
       if (!text) return json({ error: "no text" }, 400);
       const parsed = parseMpesaSms(text);
+      // A real payment SMS always carries a KES/Ksh amount. If none parsed, this
+      // is noise (OTP, promo, personal) — drop it so "forward everything" stays
+      // clean and the review inbox only ever holds actual money.
+      if (!parsed.amount) return json({ status: "not-a-payment" });
       const dedupKey = parsed.code || _normName(text).slice(0, 60);
       const seen = await env.DB.prepare("SELECT id FROM sms_payments WHERE txn_code = ?").bind(dedupKey).first();
       const alsoPaid = parsed.code ? await env.DB.prepare("SELECT id FROM payments WHERE reference = ?").bind(parsed.code).first() : null;
