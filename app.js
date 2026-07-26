@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260722-8';
+const APP_VERSION = '20260722-9';
 
 // Days after next_due before a lapsed catalog/gym client is auto-paused. The
 // morning digest warns "auto-pauses tonight" on day === GRACE; the browser
@@ -3536,6 +3536,7 @@ function renderSmsInbox() {
           ${s.paid_on ? `<span>${fmtDate(s.paid_on)}</span>` : ''}
           ${s.txn_code ? `<span class="mono">${escapeHtml(s.txn_code)}</span>` : ''}
         </div>
+        ${s.raw ? `<div class="muted-2" style="font-size:12px;margin-top:6px;white-space:normal;line-height:1.4;">${escapeHtml(s.raw)}</div>` : ''}
       </div>
       <div class="actions" style="flex-wrap:wrap;gap:6px;">
         <select id="smsClient_${s.id}" style="padding:6px 8px;border:1px solid #e5e5e5;border-radius:8px;font-size:13px;max-width:190px;background:#fff;color:inherit;">
