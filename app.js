@@ -5,7 +5,13 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260722-6';
+const APP_VERSION = '20260722-7';
+
+// Days after next_due before a lapsed catalog/gym client is auto-paused. The
+// morning digest warns "auto-pauses tonight" on day === GRACE; the browser
+// executes the pause once day > GRACE (so the warning always lands first).
+// Keep in sync with AUTO_PAUSE_GRACE_DAYS in worker/src/index.js.
+const AUTO_PAUSE_GRACE_DAYS = 3;
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
 
 // Service catalogue, mirrored from essenceautomations.com — the footer "Services"
@@ -174,7 +180,15 @@ async function loadData() {
   state.prospects = data.prospects || [];
   state.sms_inbox = data.sms_inbox || [];
   renderAll();
+  // Once per session, after the first render, sweep for lapsed clients past the
+  // grace period and take their sites offline. Fire-and-forget so it never blocks
+  // the initial paint; the flag is set first so its own loadData() won't recurse.
+  if (!_autoPauseChecked) {
+    _autoPauseChecked = true;
+    autoPauseLapsed();
+  }
 }
+let _autoPauseChecked = false;
 
 // Add N months to an ISO date, handling month-end overflow
 function addMonthsISO(iso, months) {
@@ -798,6 +812,47 @@ window.resumeProspectWeb = async function (id) {
     toast(err.message, 'error');
   }
 };
+
+// Auto-pause: on load, take offline any active catalog/gym client whose payment
+// is more than the grace period overdue. The morning digest has already warned
+// Joel ("auto-pauses tonight"), so by the time this fires (day > GRACE) he's had
+// his chance to record a payment. Runs in the browser because a worker→worker
+// suspend on a same-zone *.workers.dev is blocked by CF error 1042. Fully
+// reversible — resuming or recording a payment brings the site straight back.
+async function autoPauseLapsed() {
+  const due = state.clients.filter((c) =>
+    c.status === 'active' &&
+    c.catalog_api_base &&
+    c.pausable !== 0 &&
+    c.plan !== 'one-off' &&
+    !c.subaccount_paused &&
+    c.next_due &&
+    daysFromToday(c.next_due) < -AUTO_PAUSE_GRACE_DAYS
+  );
+  if (!due.length) return;
+  const paused = [];
+  const failed = [];
+  for (const c of due) {
+    try {
+      await api(`/api/clients/${c.id}/subaccount`, { method: 'POST', body: JSON.stringify({ paused: true }) });
+      await catalogSuspend(c, true, 'client');
+      paused.push(c);
+    } catch (err) {
+      // Catalog suspend failed after we flagged it paused in billing — roll the
+      // flag back so the two stay consistent and it retries on the next open.
+      try { await api(`/api/clients/${c.id}/subaccount`, { method: 'POST', body: JSON.stringify({ paused: false }) }); } catch {}
+      failed.push(c.name);
+    }
+  }
+  if (paused.length || failed.length) await loadData();
+  if (paused.length) {
+    const names = paused.map((c) => c.name).join(', ');
+    toast(`⏸ Auto-paused ${paused.length} lapsed client${paused.length > 1 ? 's' : ''} (past grace): ${names}. Record a payment to bring back.`);
+  }
+  if (failed.length) {
+    toast(`Couldn't auto-pause ${failed.join(', ')} — open them and pause manually`, 'error');
+  }
+}
 
 function renderOverdue() {
   const today = todayISO();

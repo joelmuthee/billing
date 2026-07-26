@@ -950,6 +950,26 @@ function fmtDMY(iso) {
   return `${d}/${m}/${y}`;
 }
 
+// Days after next_due before a lapsed catalog/gym client is auto-paused. The
+// digest warns "auto-pauses tonight" on the morning of day === GRACE; the browser
+// executes the pause on the next dashboard open once day > GRACE. Keep in sync
+// with AUTO_PAUSE_GRACE_DAYS in app.js.
+const AUTO_PAUSE_GRACE_DAYS = 3;
+
+// A Gym Manager client rides the same kill-switch as a catalog but "freezes"
+// rather than "goes offline" — detect it off the service tag for the wording.
+function clientIsGymRow(c) {
+  let s = c && c.services;
+  if (typeof s === "string") { try { s = JSON.parse(s); } catch { s = []; } }
+  return Array.isArray(s) && s.includes("gym-manager");
+}
+// Clients the auto-pause sweep will act on: active, has a catalog/gym site,
+// not exempted (pausable), recurring, not already paused.
+function isAutoPausable(c) {
+  return c.status === "active" && c.catalog_api_base && c.pausable !== 0 &&
+    c.plan !== "one-off" && !c.subaccount_paused && c.next_due;
+}
+
 async function runOverdueDigest(env) {
   const today = nairobiTodayISO();
   const in3 = addDaysISO_(today, 3);
@@ -1009,6 +1029,29 @@ async function runOverdueDigest(env) {
     }
     for (const s of schedSoon) {
       lines.push(`  - ${s.client_name} — ${s.description || "scheduled payment"} (${fmtKES_(s.amount)}), due ${fmtDMY(s.due_date)}.`);
+    }
+    lines.push("");
+  }
+
+  // Auto-pause heads-up. On the morning a lapsed catalog/gym client crosses the
+  // grace line, warn Joel so he can record a paid-but-unlogged payment before the
+  // site goes offline tonight. Those already past grace get a note that they pause
+  // on the next dashboard open (the browser does it — worker→worker suspend is
+  // blocked by CF 1042).
+  const pauseTonight = overdue.filter((c) => isAutoPausable(c) && daysLate(today, c.next_due) === AUTO_PAUSE_GRACE_DAYS);
+  const pastGrace = overdue.filter((c) => isAutoPausable(c) && daysLate(today, c.next_due) > AUTO_PAUSE_GRACE_DAYS);
+  if (pauseTonight.length) {
+    lines.push("⏸ Auto-pausing tonight unless you record a payment:");
+    for (const c of pauseTonight) {
+      const what = clientIsGymRow(c) ? "gym freezes tonight" : "website goes offline tonight";
+      lines.push(`  - ${c.name} — ${what}. ${fmtKES_(c.amount)}, ${AUTO_PAUSE_GRACE_DAYS} days overdue.`);
+    }
+    lines.push("");
+  }
+  if (pastGrace.length) {
+    lines.push("Past grace — these pause the next time you open the dashboard:");
+    for (const c of pastGrace) {
+      lines.push(`  - ${c.name} (${fmtKES_(c.amount)}), ${daysLate(today, c.next_due)} days overdue.`);
     }
     lines.push("");
   }
