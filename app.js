@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260722-7';
+const APP_VERSION = '20260722-8';
 
 // Days after next_due before a lapsed catalog/gym client is auto-paused. The
 // morning digest warns "auto-pauses tonight" on day === GRACE; the browser
@@ -305,6 +305,7 @@ function renderAll() {
   renderUpsellFollowups();
   renderProspectFollowups();
   renderSmsInbox();
+  renderUnmatchedClients();
   renderRecent();
   renderClientsList();
   renderProspects();
@@ -3564,6 +3565,33 @@ window.ignoreSms = async function (id) {
     toast('Ignored');
   } catch (err) { toast(err.message, 'error'); }
 };
+
+// Learned M-Pesa pay-names for a client (JSON array on the row), null-tolerant.
+function clientPayNames(c) {
+  if (!c || !c.pay_names) return [];
+  try { const a = JSON.parse(c.pay_names); return Array.isArray(a) ? a : []; } catch { return []; }
+}
+// Flag active recurring clients we haven't yet learned an M-Pesa pay-name for.
+// Their first payment needs a manual confirm (which teaches the system); after
+// that they auto-match. Offline payers (expects_sms = 0, e.g. cheque) are skipped.
+function renderUnmatchedClients() {
+  const card = $('#unmatchedCard');
+  const el = $('#unmatchedList');
+  if (!card || !el) return;
+  const items = state.clients.filter((c) =>
+    c.status === 'active' && c.plan !== 'one-off' && c.expects_sms !== 0 && clientPayNames(c).length === 0
+  );
+  if (items.length === 0) { card.hidden = true; return; }
+  card.hidden = false;
+  el.innerHTML = items.map((c) => `
+    <div class="list-row">
+      <div>
+        <div class="primary">${escapeHtml(c.business || c.name)}${c.business ? ` <span class="muted-2" style="font-weight:400;">${escapeHtml(c.name)}</span>` : ''}</div>
+        <div class="sub"><span class="badge muted">no M-Pesa name learned yet</span></div>
+      </div>
+      <div class="actions"><span class="muted-2" style="font-size:12px;">confirm 1st payment by hand</span></div>
+    </div>`).join('');
+}
 
 function serializeProspect(p, overrides = {}) {
   return {

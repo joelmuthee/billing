@@ -99,29 +99,59 @@ function parseMpesaSms(text) {
     source = "mpesa";
     const cm = t.match(/^([A-Z0-9]{10})\s+Confirmed/i);
     code = cm ? cm[1].toUpperCase() : null;
-    const m = t.match(/from (.+?)\s+(\d{5,})\s+on\s+(\d{1,2}\/\d{1,2}\/\d{2,4})/i);
-    if (m) { name = m[1].trim(); paidOn = normSmsDate(m[3]); }
+    // Sender line is "from NAME NUMBER on DATE". The number is either a short
+    // business code (356140) or a masked personal number (0714***436), so allow
+    // digits and asterisks; fall back to "from NAME on DATE" if no number shows.
+    const m = t.match(/from (.+?)\s+[\d*]{5,}\s+on\s+(\d{1,2}\/\d{1,2}\/\d{2,4})/i)
+           || t.match(/from (.+?)\s+on\s+(\d{1,2}\/\d{1,2}\/\d{2,4})/i);
+    if (m) { name = m[1].trim(); paidOn = normSmsDate(m[2]); }
   }
   return { amount, name, code, paidOn, source };
 }
 const _normName = (s) => String(s || "").toUpperCase().replace(/[^A-Z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
-// A client matches when the sender name contains every token of the client's
-// business OR name ("Purity" matches "PURITY WANJA NJIRU"; "Echelon Tactical &
-// Fitness" matches the business). Returns all matching clients.
+// Learned M-Pesa sender names stored on a client (JSON array), tolerant of nulls.
+function parsePayNames(v) {
+  if (!v) return [];
+  try { const a = JSON.parse(v); return Array.isArray(a) ? a : []; } catch { return []; }
+}
+// Match a sender name to clients, strongest signal first:
+//   1. Exact match against a client's LEARNED pay-name (from a prior confirm) —
+//      this wins outright, so a taught client always resolves to itself even if
+//      another client shares a first name.
+//   2. Otherwise, the sender name contains every WHOLE-WORD token of a client's
+//      business OR name ("Purity" matches "PURITY WANJA NJIRU"; a business matches
+//      itself). Whole-word only — a substring match would misroute "JOSEPH
+//      NDANGILI" to a client named "Dan" (N-DAN-GILI), so it's deliberately absent.
+// Returns all clients that match at the winning tier.
 function matchClientsByName(senderName, clients) {
   const sn = _normName(senderName);
+  if (!sn) return [];
+  const aliasHits = clients.filter((c) => parsePayNames(c.pay_names).some((a) => _normName(a) === sn));
+  if (aliasHits.length) return aliasHits;
   const set = new Set(sn.split(" ").filter(Boolean));
   const hits = [];
   for (const c of clients) {
     for (const f of [c.business, c.name].filter(Boolean)) {
       const ft = _normName(f).split(" ").filter(Boolean);
-      if ((ft.length && ft.every((tk) => set.has(tk))) || (_normName(f) && sn.includes(_normName(f)))) {
+      if (ft.length && ft.every((tk) => set.has(tk))) {
         hits.push(c);
         break;
       }
     }
   }
   return hits;
+}
+// Append a sender name to a client's learned pay-names (deduped, normalized).
+async function addPayName(env, clientId, senderName) {
+  const nm = String(senderName || "").trim();
+  if (!nm || !clientId) return;
+  const row = await env.DB.prepare("SELECT pay_names FROM clients WHERE id = ?").bind(clientId).first();
+  if (!row) return;
+  const arr = parsePayNames(row.pay_names);
+  const norm = _normName(nm);
+  if (arr.some((a) => _normName(a) === norm)) return;
+  arr.push(nm);
+  await env.DB.prepare("UPDATE clients SET pay_names = ? WHERE id = ?").bind(JSON.stringify(arr), clientId).run();
 }
 // Record a client payment: insert, mark a linked scheduled item paid, advance
 // next_due (or complete a fully-paid one-off), resume a paused subaccount. Shared
@@ -479,7 +509,7 @@ export default {
       const seen = await env.DB.prepare("SELECT id FROM sms_payments WHERE txn_code = ?").bind(dedupKey).first();
       const alsoPaid = parsed.code ? await env.DB.prepare("SELECT id FROM payments WHERE reference = ?").bind(parsed.code).first() : null;
       if (seen || alsoPaid) return json({ status: "duplicate", txn_code: dedupKey });
-      const clientsRs = await env.DB.prepare("SELECT id, name, business, plan, status, amount FROM clients WHERE status = 'active'").all();
+      const clientsRs = await env.DB.prepare("SELECT id, name, business, plan, status, amount, pay_names FROM clients WHERE status = 'active'").all();
       const matches = matchClientsByName(parsed.name || "", clientsRs.results || []);
       const unique = matches.length === 1 ? matches[0] : null;
       // Auto-record only a confident, UNIQUE match on a recurring client. One-off
@@ -496,7 +526,7 @@ export default {
           method: "mpesa", reference: parsed.code,
           notes: `Auto from ${parsed.source === "loop" ? "LOOP" : "M-Pesa"} SMS · ${parsed.name}`,
         });
-        if (!rec.error) { paymentId = rec.payment.id; finalStatus = "recorded"; }
+        if (!rec.error) { paymentId = rec.payment.id; finalStatus = "recorded"; await addPayName(env, unique.id, parsed.name); }
       }
       await env.DB.prepare(
         `INSERT OR IGNORE INTO sms_payments (raw, amount, sender_name, txn_code, paid_on, source, status, client_id, payment_id)
@@ -527,6 +557,8 @@ export default {
       });
       if (rec.error) return json({ error: rec.error }, rec.status || 400);
       await env.DB.prepare("UPDATE sms_payments SET status = 'recorded', client_id = ?, payment_id = ? WHERE id = ?").bind(clientId, rec.payment.id, id).run();
+      // Learn this sender name for the client so future payments under it auto-record.
+      await addPayName(env, clientId, row.sender_name);
       return json({ ok: true, status: "recorded", payment: rec.payment, client: rec.client });
     }
 
