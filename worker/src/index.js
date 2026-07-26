@@ -83,18 +83,39 @@ function normSmsDate(s) {
   if (y.length === 2) y = "20" + y;
   return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
 }
-// Two real formats: LOOP ("You have received KES.X on M-Pesa from NAME on
-// dd/mm/yyyy … M-Pesa Ref, CODE.") and M-Pesa business ("CODE Confirmed.You have
-// received KshX from NAME NUMBER on d/m/yy …"). Returns {amount,name,code,paidOn,source}.
+// A dateless SMS (the "sent to your MPESA" format has no date in the body) is
+// dated the day it arrives: the forwarder's received timestamp if it sends one
+// (payload "ts", epoch ms), else the server's Nairobi date.
+function smsDateFallback(body) {
+  const ts = body && Number(body.ts);
+  if (Number.isFinite(ts) && ts > 1e12) {
+    return new Date(ts + 3 * 3600 * 1000).toISOString().slice(0, 10);
+  }
+  return nairobiTodayISO();
+}
+// Three real formats:
+//   LOOP    "You have received KES.X on M-Pesa from NAME on dd/mm/yyyy … M-Pesa Ref, CODE."
+//   biz     "CODE Confirmed.You have received KshX from NAME NUMBER on d/m/yy …"
+//   sent-to "NAME has sent KShs. X to your MPESA. The MPESA receipt number is CODE …"
+// The sent-to format carries NO date in the body — the caller defaults paidOn to
+// the day it arrives. Returns {amount,name,code,paidOn,source}.
 function parseMpesaSms(text) {
   const t = (text || "").replace(/\s+/g, " ").trim();
-  const amtM = t.match(/(?:KES|Ksh)\.?\s?([\d,]+(?:\.\d{2})?)/i);
+  // Amount tolerates KES / Ksh / KShs, an optional dot, and 1+ decimals (5000.0).
+  const amtM = t.match(/(?:KSHS|KSH|KES)\.?\s?([\d,]+(?:\.\d+)?)/i);
   const amount = amtM ? Math.round(parseFloat(amtM[1].replace(/,/g, ""))) : null;
   let name = null, code = null, paidOn = null, source = "unknown";
   if (/LOOP Ref/i.test(t)) {
     source = "loop";
     const m = t.match(/from (.+?) on (\d{1,2}\/\d{1,2}\/\d{2,4})[\s\d:]*\.?.*?M-Pesa Ref,?\s*([A-Z0-9]+)/i);
     if (m) { name = m[1].trim(); paidOn = normSmsDate(m[2]); code = m[3].toUpperCase(); }
+  } else if (/has sent\b.*\bto your M-?PESA/i.test(t) || /M-?PESA receipt number is/i.test(t)) {
+    // Name comes first; the 10-char receipt number is the dedup code. No date here.
+    source = "mpesa";
+    const nm = t.match(/^(.+?)\s+has sent\b/i);
+    if (nm) name = nm[1].trim();
+    const rc = t.match(/receipt number is\s+([A-Z0-9]{10})/i);
+    if (rc) code = rc[1].toUpperCase();
   } else if (/Confirmed\.?\s*You have received/i.test(t) || /New M-PESA balance/i.test(t)) {
     source = "mpesa";
     const cm = t.match(/^([A-Z0-9]{10})\s+Confirmed/i);
@@ -505,6 +526,9 @@ export default {
       // is noise (OTP, promo, personal) — drop it so "forward everything" stays
       // clean and the review inbox only ever holds actual money.
       if (!parsed.amount) return json({ status: "not-a-payment" });
+      // Formats without a date in the body (the "sent to your MPESA" one) are
+      // dated the day the SMS arrives, so auto-record can still proceed.
+      if (!parsed.paidOn) parsed.paidOn = smsDateFallback(body);
       const dedupKey = parsed.code || _normName(text).slice(0, 60);
       const seen = await env.DB.prepare("SELECT id FROM sms_payments WHERE txn_code = ?").bind(dedupKey).first();
       const alsoPaid = parsed.code ? await env.DB.prepare("SELECT id FROM payments WHERE reference = ?").bind(parsed.code).first() : null;
