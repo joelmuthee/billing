@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260722-5';
+const APP_VERSION = '20260722-6';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
 
 // Service catalogue, mirrored from essenceautomations.com — the footer "Services"
@@ -62,7 +62,7 @@ const state = {
   clientFilter: 'all',
   clientSearch: '',
   prospectFilter: 'open',
-  upcomingDays: 30,
+  upcomingDays: 7,
   adsExpanded: false,
   expensePeriod: 'thismonth',
   paymentsPeriod: 'thismonth',
