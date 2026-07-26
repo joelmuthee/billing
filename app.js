@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260722-3';
+const APP_VERSION = '20260722-4';
 console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
 
 // Service catalogue, mirrored from essenceautomations.com — the footer "Services"
@@ -631,7 +631,7 @@ function upcomingRowHtml(it, kind) {
         <div class="sub">
           <span class="badge plan-${c.plan}">${planLabel(c.plan)}</span>
           ${invoiceBadge(it)}
-          ${c.subaccount_paused ? `<span class="badge warn">⏸ ${c.catalog_api_base ? 'Website' : 'Subaccount'} paused ${fmtDateShort(c.subaccount_paused)}</span>` : ''}
+          ${c.subaccount_paused ? `<span class="badge warn">⏸ ${pauseWording(c).pausedBadge} ${fmtDateShort(c.subaccount_paused)}</span>` : ''}
           ${kind === 'overdue'
             ? `<span class="badge danger">${Math.abs(daysFromToday(it.due))} days late</span><span>Was due ${fmtDate(it.due)}</span>`
             : `<span>Due ${fmtDate(it.due)} · ${fmtRelative(it.due)}</span>`}
@@ -643,8 +643,8 @@ function upcomingRowHtml(it, kind) {
         ${reminderAction(c, kind)}
         ${kind === 'overdue' && c.plan !== 'one-off' && c.pausable !== 0
           ? (c.subaccount_paused
-            ? `<button class="btn-sm" onclick="resumeSubaccount(${c.id})" title="${c.catalog_api_base ? 'Bring their website back online' : 'Resume their GHL subaccount'}">Resume ${c.catalog_api_base ? 'web' : 'sub'}</button>`
-            : `<button class="btn-sm danger" onclick="pauseSubaccount(${c.id})" title="${c.catalog_api_base ? 'Take their website offline' : 'Pause their GHL subaccount'}">Pause ${c.catalog_api_base ? 'web' : 'sub'}</button>`)
+            ? `<button class="btn-sm" onclick="resumeSubaccount(${c.id})" title="${pauseWording(c).resumeTitle}">Resume ${pauseWording(c).label}</button>`
+            : `<button class="btn-sm danger" onclick="pauseSubaccount(${c.id})" title="${pauseWording(c).pauseTitle}">Pause ${pauseWording(c).label}</button>`)
           : ''}
         <button class="btn-sm" onclick="quickPay(${c.id})">Mark paid</button>
       </div>
@@ -714,11 +714,29 @@ window.lockLoyalty = async function (id) {
   }
 };
 
+// A Gym Manager client rides the same catalog_api_base kill-switch (the browser
+// POSTs /api/suspend to its worker), but the control must say "gym / freeze the
+// door", not "website offline". Detect it off the service tag.
+function clientIsGym(c) {
+  let s = c && c.services;
+  if (typeof s === 'string') { try { s = JSON.parse(s); } catch { s = []; } }
+  return Array.isArray(s) && s.includes('gym-manager');
+}
+// Wording for the pause/resume control, by what it actually acts on.
+function pauseWording(c) {
+  if (!c.catalog_api_base) return { label: 'sub', pauseTitle: 'Pause their GHL subaccount', resumeTitle: 'Resume their GHL subaccount', pausedBadge: 'Subaccount paused' };
+  if (clientIsGym(c)) return { label: 'gym', pauseTitle: 'Freeze the gym — blocks door check-ins + owner admin', resumeTitle: 'Bring their gym system back online', pausedBadge: 'Gym frozen' };
+  return { label: 'web', pauseTitle: 'Take their website offline', resumeTitle: 'Bring their website back online', pausedBadge: 'Website paused' };
+}
+
 window.pauseSubaccount = async function (id) {
   const c = state.clients.find((x) => x.id === id);
   if (!c) return;
   const isWeb = !!c.catalog_api_base;
-  const msg = isWeb
+  const isGym = isWeb && clientIsGym(c);
+  const msg = isGym
+    ? `Freeze ${c.name}'s gym now?\n\nMembers can't check in at the door, and the owner can't add members, record payments or change settings. Reads still work, so the admin shows "contact billing", not a broken app. It comes straight back when you resume it or record a payment.`
+    : isWeb
     ? `Take ${c.name}'s website offline now?\n\nVisitors will immediately see a "temporarily offline" notice (no products, no ordering). It comes straight back when you resume it or record a payment.`
     : `Pause ${c.name}'s GHL subaccount?\n\nMark this once you've paused their subaccount in GHL for non-payment. They STAY in your overdue list (they still owe you) — this just records that their service is off. Recording a payment later resumes them automatically.`;
   if (!confirm(msg)) return;
@@ -726,7 +744,7 @@ window.pauseSubaccount = async function (id) {
     await api(`/api/clients/${id}/subaccount`, { method: 'POST', body: JSON.stringify({ paused: true }) });
     if (isWeb) await catalogSuspend(c, true, 'client');
     await loadData();
-    toast(isWeb ? `${c.name} website taken offline` : `${c.name} subaccount paused`);
+    toast(isGym ? `${c.name} gym frozen` : isWeb ? `${c.name} website taken offline` : `${c.name} subaccount paused`);
   } catch (err) {
     toast(err.message, 'error');
   }
@@ -736,11 +754,12 @@ window.resumeSubaccount = async function (id) {
   const c = state.clients.find((x) => x.id === id);
   if (!c) return;
   const isWeb = !!c.catalog_api_base;
+  const isGym = isWeb && clientIsGym(c);
   try {
     await api(`/api/clients/${id}/subaccount`, { method: 'POST', body: JSON.stringify({ paused: false }) });
     if (isWeb) await catalogSuspend(c, false);
     await loadData();
-    toast(isWeb ? `${c.name} website back online` : `${c.name} subaccount resumed`);
+    toast(isGym ? `${c.name} gym back online` : isWeb ? `${c.name} website back online` : `${c.name} subaccount resumed`);
   } catch (err) {
     toast(err.message, 'error');
   }
@@ -1153,7 +1172,7 @@ function renderClientsList() {
             <span class="badge plan-${c.plan}">${planLabel(c.plan)}</span>
             ${c.status !== 'active' ? `<span class="badge muted">${c.status}</span>` : ''}
             ${overdue ? `<span class="badge danger">Overdue</span>` : ''}
-            ${c.subaccount_paused ? `<span class="badge warn">⏸ ${c.catalog_api_base ? 'Website offline' : 'Subaccount paused'}</span>` : ''}
+            ${c.subaccount_paused ? `<span class="badge warn">⏸ ${pauseWording(c).pausedBadge}</span>` : ''}
             ${c.next_due ? `<span>Next due ${fmtDate(c.next_due)}</span>` : `<span>${c.plan === 'one-off' ? 'One off' : 'No due date'}</span>`}
             ${c.phone ? `<span class="mono">${escapeHtml(c.phone)}</span>` : ''}
             ${c.source ? `<span class="badge muted">via ${escapeHtml(c.source)}</span>` : ''}
@@ -1169,8 +1188,8 @@ function renderClientsList() {
           <button class="btn-sm" onclick="quickPay(${c.id})">Pay</button>
           ${c.catalog_api_base
             ? (c.subaccount_paused
-              ? `<button class="btn-sm" onclick="resumeSubaccount(${c.id})" title="Bring their website back online">Resume web</button>`
-              : `<button class="btn-sm danger" onclick="pauseSubaccount(${c.id})" title="Take their website offline">Pause web</button>`)
+              ? `<button class="btn-sm" onclick="resumeSubaccount(${c.id})" title="${pauseWording(c).resumeTitle}">Resume ${pauseWording(c).label}</button>`
+              : `<button class="btn-sm danger" onclick="pauseSubaccount(${c.id})" title="${pauseWording(c).pauseTitle}">Pause ${pauseWording(c).label}</button>`)
             : ''}
           ${c.catalog_api_base
             ? `<button class="btn-sm" onclick="unlockLoyalty(${c.id})" title="Unlock the paid Loyalty Program in their shop admin">🎁 Unlock loyalty</button><button class="btn-sm" onclick="lockLoyalty(${c.id})" title="Re-lock the Loyalty Program (correction only)">Lock</button>`
