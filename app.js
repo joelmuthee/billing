@@ -680,13 +680,17 @@ async function getCatalogToken() {
   return _catalogToken;
 }
 // mode ("client" | "prospect") tells the catalog which paused overlay to show:
-// a paid client gets the neutral "find us on Instagram" page, a prospect gets the
+// a paid client gets the neutral "temporarily offline" page, a prospect gets the
 // one-off win-back pitch. Sent on pause; ignored on resume (overlay isn't shown).
-async function catalogSuspend(client, suspended, mode) {
+// level ("admin" | "full") is how hard we squeeze: "admin" freezes only the owner's
+// admin and leaves her storefront live for customers; "full" also takes the public
+// site offline. Omitted = full (the catalog's default), which is right for prospects.
+async function catalogSuspend(client, suspended, mode, level) {
   if (!client || !client.catalog_api_base) return;
   const token = await getCatalogToken();
   const body = { suspended: !!suspended };
   if (mode) body.mode = mode;
+  if (level) body.level = level;
   const res = await fetch(`${client.catalog_api_base.replace(/\/+$/, '')}/api/suspend`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -752,17 +756,33 @@ window.pauseSubaccount = async function (id) {
   if (!c) return;
   const isWeb = !!c.catalog_api_base;
   const isGym = isWeb && clientIsGym(c);
+  // For a website client, choose how hard to squeeze. Default (OK) is the safe
+  // one: freeze her admin but leave the storefront live, so her customers are
+  // never caught in our billing dispute. Full offline is the deliberate escalation.
+  let level = null;
+  if (isWeb && !isGym) {
+    level = confirm(
+      `Pause ${c.name}'s ADMIN only?\n\n` +
+      `OK  =  Admin only (recommended). Her website stays live for customers, but she cannot add stock, sell, or run marketing until she pays.\n\n` +
+      `Cancel  =  Also take the website offline. Her customers will see a "temporarily offline" notice.`
+    ) ? 'admin' : 'full';
+    if (level === 'full' && !confirm(
+      `Take ${c.name}'s whole website offline?\n\nHer customers will not be able to browse or order. Only do this if the admin freeze has not worked.`
+    )) return;
+  }
   const msg = isGym
     ? `Freeze ${c.name}'s gym now?\n\nMembers can't check in at the door, and the owner can't add members, record payments or change settings. Reads still work, so the admin shows "contact billing", not a broken app. It comes straight back when you resume it or record a payment.`
     : isWeb
-    ? `Take ${c.name}'s website offline now?\n\nVisitors will immediately see a "temporarily offline" notice (no products, no ordering). It comes straight back when you resume it or record a payment.`
+    ? (level === 'admin'
+      ? `Freeze ${c.name}'s admin now?\n\nHer website stays live and customers can still order. She cannot add stock, record a sale, or run marketing until you resume or record a payment.`
+      : `Take ${c.name}'s website offline now?\n\nVisitors will immediately see a "temporarily offline" notice (no products, no ordering). It comes straight back when you resume it or record a payment.`)
     : `Pause ${c.name}'s GHL subaccount?\n\nMark this once you've paused their subaccount in GHL for non-payment. They STAY in your overdue list (they still owe you) — this just records that their service is off. Recording a payment later resumes them automatically.`;
   if (!confirm(msg)) return;
   try {
     await api(`/api/clients/${id}/subaccount`, { method: 'POST', body: JSON.stringify({ paused: true }) });
-    if (isWeb) await catalogSuspend(c, true, 'client');
+    if (isWeb) await catalogSuspend(c, true, 'client', level);
     await loadData();
-    toast(isGym ? `${c.name} gym frozen` : isWeb ? `${c.name} website taken offline` : `${c.name} subaccount paused`);
+    toast(isGym ? `${c.name} gym frozen` : isWeb ? (level === 'admin' ? `${c.name} admin frozen, website still live` : `${c.name} website taken offline`) : `${c.name} subaccount paused`);
   } catch (err) {
     toast(err.message, 'error');
   }
@@ -836,7 +856,11 @@ async function autoPauseLapsed() {
   for (const c of due) {
     try {
       await api(`/api/clients/${c.id}/subaccount`, { method: 'POST', body: JSON.stringify({ paused: true }) });
-      await catalogSuspend(c, true, 'client');
+      // Admin-level only. This fires automatically with nobody watching, so it
+      // takes the safe option: freeze the owner's admin (real pressure) but leave
+      // her storefront live. Taking a client's site offline is a deliberate
+      // escalation a human makes from the Pause button.
+      await catalogSuspend(c, true, 'client', 'admin');
       paused.push(c);
     } catch (err) {
       // Catalog suspend failed after we flagged it paused in billing — roll the
@@ -848,7 +872,7 @@ async function autoPauseLapsed() {
   if (paused.length || failed.length) await loadData();
   if (paused.length) {
     const names = paused.map((c) => c.name).join(', ');
-    toast(`⏸ Auto-paused ${paused.length} lapsed client${paused.length > 1 ? 's' : ''} (past grace): ${names}. Record a payment to bring back.`);
+    toast(`⏸ Froze the admin for ${paused.length} lapsed client${paused.length > 1 ? 's' : ''} (past grace): ${names}. Their websites are still live. Record a payment to bring them back.`);
   }
   if (failed.length) {
     toast(`Couldn't auto-pause ${failed.join(', ')} — open them and pause manually`, 'error');

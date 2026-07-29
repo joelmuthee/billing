@@ -1099,7 +1099,10 @@ async function runOverdueDigest(env) {
   if (pauseTonight.length) {
     lines.push("⏸ Auto-pausing tonight unless you record a payment:");
     for (const c of pauseTonight) {
-      const what = clientIsGymRow(c) ? "gym freezes tonight" : "website goes offline tonight";
+      // Auto-pause is ADMIN-LEVEL for web clients: their shopfront stays live and
+      // only the owner's admin freezes. Taking a client's site offline is a manual
+      // escalation, so the warning must not promise it.
+      const what = clientIsGymRow(c) ? "gym freezes tonight" : "admin freezes tonight, website stays live";
       lines.push(`  - ${c.name} — ${what}. ${fmtKES_(c.amount)}, ${AUTO_PAUSE_GRACE_DAYS} days overdue.`);
     }
     lines.push("");
