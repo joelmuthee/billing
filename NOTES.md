@@ -19,6 +19,36 @@ The repo is `billing`. The CF Pages project is also `billing` (auto-created via 
 - **Dashboard**: this-month revenue, total outstanding (overdue), expected in next 30 days, active client count. Lists of upcoming dues and overdue clients with one-click "Mark paid".
 - **Revenue tab**: 30-day / 6-month / 12-month / all-time totals, recurring vs one-off split, MRR (monthly + quarterly/3), 12-month bar chart, top clients in period.
 
+## Look and feel (re-skinned 2026-07-31)
+
+This used to be a Vercel-inspired sheet (Geist, pure white, shadow-as-border). It now follows
+the **Sales Manager / agency CRM** design language: warm `#f7f6f2` page, white cards with a real
+1px `--line` border, brand orange `#fb6e10` / `#c2500a` sampled from the EA logo. Geist stayed as
+the typeface; everything else moved. On a money screen a real border reads as a solid edge where
+a shadow ring reads as a floating tile.
+
+Three things worth knowing before touching it:
+
+- **The class names are deliberately unchanged.** `app.js` builds ~64 blocks of HTML as strings,
+  so a rename is 64 chances to miss one. Only the paint moved. The old token names
+  (`--brand-orange-soft`, `--text`, `--surface`, `--shadow-card`, …) are kept as **aliases** at
+  the top of `styles.css` pointing at the new values, because `app.js` sets four of them inline.
+- **`.tab` was defined twice** in the old sheet, the second block silently killing the first's
+  animated underline. One block now.
+- **Long forms open as a right-hand drawer, confirmations stay centred.** `openModal(html,
+  'drawer')` — the variant is a call-site decision and `openModal` is the single choke point
+  every form goes through. Drawer: client, expense, payment, prospect, expense-payment,
+  scheduled-payment. Centred: deletes, pause/resume, breakdowns, copy-drafts.
+
+Re-theming a sheet walks straight past a colour set **inline on an element**, which is how a
+dark-theme pink survived onto a white page on another build. The inline hexes here are gone
+(client search box, three textareas, the SMS client picker); keep it that way, and grep for
+`#[0-9a-f]{6}` in `app.js` and `index.html` after any future theme change.
+
+Audited by measurement at 320, 375 and 1280, including both overlay states: no page-level
+sideways scroll, nothing past the right edge, nothing clipped, no control under 90px. Nav is
+6 tabs on 2 rows at both 320 and 375, wrapped, never a sideways strip.
+
 ## Stack
 
 ```

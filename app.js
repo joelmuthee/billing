@@ -5,14 +5,14 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260722-9';
+const APP_VERSION = '20260731-crm';
 
 // Days after next_due before a lapsed catalog/gym client is auto-paused. The
 // morning digest warns "auto-pauses tonight" on day === GRACE; the browser
 // executes the pause once day > GRACE (so the warning always lands first).
 // Keep in sync with AUTO_PAUSE_GRACE_DAYS in worker/src/index.js.
 const AUTO_PAUSE_GRACE_DAYS = 3;
-console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#ff8424;font-weight:600');
+console.log(`%c[Billing] app.js loaded — version ${APP_VERSION}`, 'color:#fb6e10;font-weight:600');
 
 // Service catalogue, mirrored from essenceautomations.com — the footer "Services"
 // menu (10 items, each with its own landing page) plus the three Our-Ecosystem
@@ -280,14 +280,19 @@ function toast(msg, kind = 'ok') {
 
 // ────────── Modal ──────────
 
-function openModal(html) {
+// Long forms open as a right-hand drawer, short confirmations and read-only breakdowns stay
+// centred. Pass 'drawer' as the second argument. One choke point on purpose: every form in the
+// app goes through here, so the variant is a call-site decision and not 20 copies of markup.
+function openModal(html, variant) {
   $('#modal').innerHTML = html;
+  $('#modal').classList.toggle('drawer', variant === 'drawer');
   $('#modal').classList.remove('hidden');
   $('#modalBackdrop').classList.remove('hidden');
 }
 function closeModal() {
   $('#modal').classList.add('hidden');
   $('#modalBackdrop').classList.add('hidden');
+  $('#modal').classList.remove('drawer');
   $('#modal').innerHTML = '';
 }
 $('#modalBackdrop').addEventListener('click', closeModal);
@@ -941,7 +946,7 @@ window.pitch3k = function (id) {
   openModal(`
     <h2>Pitch the 3k plan</h2>
     <p class="muted" style="margin-bottom:14px;">No phone saved for ${escapeHtml(c.name)}. Copy this and send it however you reach them.</p>
-    <textarea readonly style="width:100%;height:200px;padding:10px 12px;border:1px solid #e5e5e5;border-radius:8px;font:inherit;resize:vertical;">${escapeHtml(msg)}</textarea>
+    <textarea readonly style="height:200px;">${escapeHtml(msg)}</textarea>
     <div class="modal-actions">
       <button type="button" class="btn-primary" onclick="closeModal()">Done</button>
     </div>
@@ -1323,7 +1328,7 @@ window.addScheduled = function (clientId) {
         <button type="submit" class="btn-primary">Schedule</button>
       </div>
     </form>
-  `);
+  `, 'drawer');
   $('#scheduledForm').addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const fd = new FormData(ev.target);
@@ -1726,7 +1731,7 @@ function expenseFormHtml(e) {
 
 window.editExpense = function (id) {
   const e = id != null ? state.expenses.find((x) => x.id === id) : null;
-  openModal(expenseFormHtml(e));
+  openModal(expenseFormHtml(e), 'drawer');
   $('#expenseForm').addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const fd = new FormData(ev.target);
@@ -1864,7 +1869,7 @@ function expensePaymentFormHtml(preselect) {
 
 window.logExpensePayment = function (expenseId) {
   const preselect = expenseId != null ? state.expenses.find((e) => e.id === expenseId) : null;
-  openModal(expensePaymentFormHtml(preselect));
+  openModal(expensePaymentFormHtml(preselect), 'drawer');
   $('#expensePaymentForm select[name="expense_id"]').addEventListener('change', (ev) => {
     const e = state.expenses.find((x) => x.id === Number(ev.target.value));
     if (e) {
@@ -2839,7 +2844,7 @@ function clientFormHtml(c) {
 
 window.editClient = function (id, opts = {}) {
   const c = id != null ? state.clients.find((x) => x.id === id) : null;
-  openModal(clientFormHtml(c));
+  openModal(clientFormHtml(c), 'drawer');
   // Convert-to-client and similar flows can pre-fill the add form.
   if (!c && opts.prefill) {
     const f = $('#clientForm');
@@ -3272,7 +3277,7 @@ function paymentFormHtml(preselect, opts) {
 
 window.recordPayment = function (clientId, opts) {
   const preselect = clientId != null ? state.clients.find((c) => c.id === clientId) : null;
-  openModal(paymentFormHtml(preselect, opts));
+  openModal(paymentFormHtml(preselect, opts), 'drawer');
   // Auto-fill amount when client changes (only when no scheduled preset)
   if (!opts || !opts.scheduled_payment_id) {
     $('#paymentForm select[name="client_id"]').addEventListener('change', (e) => {
@@ -3346,7 +3351,7 @@ window.openReminder = function (id) {
       ${pill('due', 'Due today')}
       ${isCatalog ? pill('paused', 'Site paused') : ''}
     </div>
-    <textarea id="reminderText" rows="7" style="width:100%;padding:10px 12px;border:1px solid #e5e5e5;border-radius:8px;font:inherit;resize:vertical;" placeholder="Generating…"></textarea>
+    <textarea id="reminderText" rows="7" placeholder="Generating…"></textarea>
     <div class="modal-actions" style="margin-top:14px;">
       <button type="button" class="btn-primary" id="reminderCopy">Copy</button>
       ${c.phone ? '<button type="button" class="btn-sm" id="reminderWa">Open WhatsApp</button>' : ''}
@@ -3563,7 +3568,7 @@ function renderSmsInbox() {
         ${s.raw ? `<div class="muted-2" style="font-size:12px;margin-top:6px;white-space:normal;line-height:1.4;">${escapeHtml(s.raw)}</div>` : ''}
       </div>
       <div class="actions" style="flex-wrap:wrap;gap:6px;">
-        <select id="smsClient_${s.id}" style="padding:6px 8px;border:1px solid #e5e5e5;border-radius:8px;font-size:13px;max-width:190px;background:#fff;color:inherit;">
+        <select id="smsClient_${s.id}" style="padding:6px 8px;font-size:13px;max-width:190px;">
           <option value="">— pick client —</option>
           ${opts(s.client_id)}
         </select>
@@ -3761,7 +3766,7 @@ function prospectFormHtml(p) {
 
 window.editProspect = function (id) {
   const p = id != null ? state.prospects.find((x) => x.id === id) : null;
-  openModal(prospectFormHtml(p));
+  openModal(prospectFormHtml(p), 'drawer');
   $('#prospectForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
