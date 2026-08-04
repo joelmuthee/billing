@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260731-crm';
+const APP_VERSION = '20260731-crm-ads';
 
 // Days after next_due before a lapsed catalog/gym client is auto-paused. The
 // morning digest warns "auto-pauses tonight" on day === GRACE; the browser
@@ -1572,6 +1572,7 @@ function renderExpensesList() {
         </div>
         <div class="actions">
           <div class="amount num">${fmtKES(adsTotal)}</div>
+          <button class="btn-sm" onclick="event.stopPropagation();updateAdSpend()" title="Open Meta Ads Manager and copy the ask for Claude">⟳ Update ad spend</button>
         </div>
       </div>
       ${open ? ads.map((e) => expenseRowHtml(e, true)).join('') + `
@@ -1587,6 +1588,32 @@ function renderExpensesList() {
 window.toggleAdsGroup = function () {
   state.adsExpanded = !state.adsExpanded;
   renderExpensesList();
+};
+
+// Meta ad account the IG ads actually run on (USD, personal). The other account
+// on the login has only dead 2023-25 campaigns.
+const META_ADS_ACCOUNT = '10213388279954524';
+
+// "Update ad spend" — there's no Meta API key on this dashboard (deliberate: a
+// token would expire every ~60 days and need re-doing), so the pull stays a
+// Claude job. This just removes the friction: opens Ads Manager on the right
+// account and copies the exact ask, including the date to pull FROM — derived
+// from the newest ad expense on record, so the window is always right.
+window.updateAdSpend = async function () {
+  const ads = state.expenses.filter((e) => (e.category || '').toLowerCase() === 'ads');
+  const lastDate = ads.map((e) => e.start_date).filter(Boolean).sort().pop();
+  const from = lastDate ? addDaysISO(lastDate, 1) : null;
+  const ask = from
+    ? `Pull my IG ad spend from ${from} to today and record it in billing.`
+    : `Pull my IG ad spend and record it in billing.`;
+  try {
+    await navigator.clipboard.writeText(ask);
+    toast('Ask copied — paste it to Claude. Opening Ads Manager…');
+  } catch {
+    // Clipboard can be blocked (no permission / insecure context) — still useful.
+    toast('Opening Ads Manager. Ask Claude: "' + ask + '"');
+  }
+  window.open(`https://adsmanager.facebook.com/adsmanager/manage/campaigns?act=${META_ADS_ACCOUNT}`, '_blank', 'noopener');
 };
 
 function renderRecentExpensePayments() {
