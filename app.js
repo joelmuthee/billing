@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260731-wa';
+const APP_VERSION = '20260731-wa2';
 
 // Days after next_due before a lapsed catalog/gym client is auto-paused. The
 // morning digest warns "auto-pauses tonight" on day === GRACE; the browser
@@ -481,7 +481,7 @@ function waReminderUrl(c, kind) {
   const dateStr = fmtDate(c.next_due);
   let msg;
   if (kind === 'overdue') {
-    msg = `Hi ${firstName(c)}, just a quick reminder that the ${amount} payment was due on ${dateStr} and is still pending. Could you settle it when you get a chance? Thanks.`;
+    msg = `Hi ${firstName(c)}, just a quick reminder that the ${amount} payment was due on ${dateStr} and is still pending. Kindly settle to avoid interruption. Thanks.`;
   } else {
     msg = `Hi ${firstName(c)}, friendly reminder that your ${amount} payment is due on ${dateStr}. Thanks.`;
   }
@@ -495,7 +495,7 @@ function emailDraft(c, kind) {
     ? `Payment reminder, ${amount}`
     : `Payment due ${dateStr}`;
   const body = kind === 'overdue'
-    ? `Hi ${firstName(c)},\n\nJust a quick reminder that the ${amount} payment was due on ${dateStr} and is still pending. Could you settle it when you get a chance?\n\nThanks,\nJoel\nEssence Automations`
+    ? `Hi ${firstName(c)},\n\nJust a quick reminder that the ${amount} payment was due on ${dateStr} and is still pending. Kindly settle to avoid interruption.\n\nThanks,\nJoel\nEssence Automations`
     : `Hi ${firstName(c)},\n\nFriendly reminder that your ${amount} payment is due on ${dateStr}.\n\nThanks,\nJoel\nEssence Automations`;
   return { subject, body };
 }
