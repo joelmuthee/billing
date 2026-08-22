@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260731-crm-ads';
+const APP_VERSION = '20260731-wa';
 
 // Days after next_due before a lapsed catalog/gym client is auto-paused. The
 // morning digest warns "auto-pauses tonight" on day === GRACE; the browser
@@ -459,9 +459,23 @@ window.showReferrals = function (id) {
   `);
 };
 
+// wa.me needs a full international number: no plus, no leading zero. Numbers get
+// saved every which way (0712…, 712…, +254 712…, 254712…), and a plain digit-strip
+// leaves "0712345678", which wa.me rejects — that's why a number had to be typed
+// with +254 for a reminder to work. Normalise at link time so any format works.
+function waDigits(phone) {
+  let d = String(phone || '').replace(/\D/g, '');
+  if (!d) return '';
+  if (d.startsWith('00')) d = d.slice(2);                  // 00254… → 254…
+  if (d.startsWith('254')) return d;                       // already international
+  if (d.startsWith('0')) return '254' + d.slice(1);        // 0712… → 254712…
+  if (d.length === 9 && /^[17]/.test(d)) return '254' + d; // 712… → 254712…
+  return d;                                                // another country, leave it
+}
+
 function waReminderUrl(c, kind) {
   if (!c.phone) return null;
-  const digits = c.phone.replace(/\D/g, '');
+  const digits = waDigits(c.phone);
   if (!digits) return null;
   const amount = fmtKES(c.amount);
   const dateStr = fmtDate(c.next_due);
@@ -938,7 +952,7 @@ window.pitch3k = function (id) {
   const c = state.clients.find((x) => x.id === id);
   if (!c) return;
   const msg = upsell3kMessage(c);
-  const digits = (c.phone || '').replace(/\D/g, '');
+  const digits = waDigits(c.phone);
   if (digits) {
     window.open(`https://wa.me/${digits}?text=${encodeURIComponent(msg)}`, '_blank', 'noopener');
     return;
@@ -2773,7 +2787,7 @@ function clientFormHtml(c) {
       <div class="form-row">
         <label>
           <span>Phone <span class="hint">(needed for WhatsApp reminders)</span></span>
-          <input type="tel" name="phone" placeholder="+254712345678" value="${isEdit && c.phone ? escapeAttr(c.phone) : ''}">
+          <input type="tel" name="phone" placeholder="0712345678 or +254712345678" value="${isEdit && c.phone ? escapeAttr(c.phone) : ''}">
         </label>
         <label>
           <span>Email <span class="hint">(needed for email reminders)</span></span>
@@ -3410,7 +3424,7 @@ window.openReminder = function (id) {
   });
   const waBtn = $('#reminderWa');
   if (waBtn) waBtn.addEventListener('click', () => {
-    const digits = (c.phone || '').replace(/\D/g, '');
+    const digits = waDigits(c.phone);
     window.open(`https://wa.me/${digits}?text=${encodeURIComponent(ta.value)}`, '_blank', 'noopener');
   });
   gen();
@@ -3695,7 +3709,7 @@ window.snoozeProspect = async function (id) {
 window.prospectFollowupWA = function (id) {
   const p = state.prospects.find((x) => x.id === id);
   if (!p || !p.phone) return;
-  const digits = (p.phone || '').replace(/\D/g, '');
+  const digits = waDigits(p.phone);
   const biz = p.business ? ` for ${p.business}` : '';
   const msg = `Hi ${p.name}, following up on the demo I put together${biz}. Happy to walk you through it whenever suits you, no rush. Let me know your thoughts.\n\nJoel, Essence Automations`;
   window.open(`https://wa.me/${digits}?text=${encodeURIComponent(msg)}`, '_blank', 'noopener');
