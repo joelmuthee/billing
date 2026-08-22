@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260731-wa2';
+const APP_VERSION = '20260822-gymlvl';
 
 // Days after next_due before a lapsed catalog/gym client is auto-paused. The
 // morning digest warns "auto-pauses tonight" on day === GRACE; the browser
@@ -775,22 +775,30 @@ window.pauseSubaccount = async function (id) {
   if (!c) return;
   const isWeb = !!c.catalog_api_base;
   const isGym = isWeb && clientIsGym(c);
-  // For a website client, choose how hard to squeeze. Default (OK) is the safe
-  // one: freeze her admin but leave the storefront live, so her customers are
-  // never caught in our billing dispute. Full offline is the deliberate escalation.
+  // Choose how hard to squeeze. Default (OK) is the safe one: freeze the owner's
+  // admin but leave the service running, so their customers (or gym members) are
+  // never caught in our billing dispute. Full is the deliberate escalation.
   let level = null;
-  if (isWeb && !isGym) {
+  if (isWeb) {
     level = confirm(
-      `Pause ${c.name}'s ADMIN only?\n\n` +
-      `OK  =  Admin only (recommended). Her website stays live for customers, but she cannot add stock, sell, or run marketing until she pays.\n\n` +
-      `Cancel  =  Also take the website offline. Her customers will see a "temporarily offline" notice.`
+      isGym
+        ? `Freeze ${c.name}'s ADMIN only?\n\n` +
+          `OK  =  Admin only (recommended). Members can still check in at the door, but they cannot add members, record payments or change settings until they pay.\n\n` +
+          `Cancel  =  Also close the door. Members will not be able to check in at all.`
+        : `Pause ${c.name}'s ADMIN only?\n\n` +
+          `OK  =  Admin only (recommended). Their website stays live for customers, but they cannot add stock, sell, or run marketing until they pay.\n\n` +
+          `Cancel  =  Also take the website offline. Their customers will see a "temporarily offline" notice.`
     ) ? 'admin' : 'full';
     if (level === 'full' && !confirm(
-      `Take ${c.name}'s whole website offline?\n\nHer customers will not be able to browse or order. Only do this if the admin freeze has not worked.`
+      isGym
+        ? `Close ${c.name}'s door too?\n\nMembers will not be able to check in at all. Only do this if the admin freeze has not worked.`
+        : `Take ${c.name}'s whole website offline?\n\nTheir customers will not be able to browse or order. Only do this if the admin freeze has not worked.`
     )) return;
   }
   const msg = isGym
-    ? `Freeze ${c.name}'s gym now?\n\nMembers can't check in at the door, and the owner can't add members, record payments or change settings. Reads still work, so the admin shows "contact billing", not a broken app. It comes straight back when you resume it or record a payment.`
+    ? (level === 'admin'
+      ? `Freeze ${c.name}'s admin now?\n\nMembers can still check in at the door, so the gym keeps running. The owner can't add members, record payments or change settings until you resume or record a payment.`
+      : `Freeze ${c.name}'s whole gym now?\n\nMembers can't check in at the door, and the owner can't add members, record payments or change settings. Reads still work, so the admin shows "contact billing", not a broken app. It comes straight back when you resume it or record a payment.`)
     : isWeb
     ? (level === 'admin'
       ? `Freeze ${c.name}'s admin now?\n\nHer website stays live and customers can still order. She cannot add stock, record a sale, or run marketing until you resume or record a payment.`
@@ -801,7 +809,10 @@ window.pauseSubaccount = async function (id) {
     await api(`/api/clients/${id}/subaccount`, { method: 'POST', body: JSON.stringify({ paused: true }) });
     if (isWeb) await catalogSuspend(c, true, 'client', level);
     await loadData();
-    toast(isGym ? `${c.name} gym frozen` : isWeb ? (level === 'admin' ? `${c.name} admin frozen, website still live` : `${c.name} website taken offline`) : `${c.name} subaccount paused`);
+    toast(isGym
+      ? (level === 'admin' ? `${c.name} admin frozen, door still open` : `${c.name} gym frozen, door closed`)
+      : isWeb ? (level === 'admin' ? `${c.name} admin frozen, website still live` : `${c.name} website taken offline`)
+      : `${c.name} subaccount paused`);
   } catch (err) {
     toast(err.message, 'error');
   }
@@ -891,7 +902,7 @@ async function autoPauseLapsed() {
   if (paused.length || failed.length) await loadData();
   if (paused.length) {
     const names = paused.map((c) => c.name).join(', ');
-    toast(`⏸ Froze the admin for ${paused.length} lapsed client${paused.length > 1 ? 's' : ''} (past grace): ${names}. Their websites are still live. Record a payment to bring them back.`);
+    toast(`⏸ Froze the admin for ${paused.length} lapsed client${paused.length > 1 ? 's' : ''} (past grace): ${names}. Their customers are unaffected. Record a payment to bring them back.`);
   }
   if (failed.length) {
     toast(`Couldn't auto-pause ${failed.join(', ')} — open them and pause manually`, 'error');
