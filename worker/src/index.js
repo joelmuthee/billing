@@ -405,6 +405,64 @@ const worker = {
       });
     }
 
+    // One row per client saying where their account stands today, for the agency CRM's
+    // contact cards. The "owed" rule is the same one the dashboard uses (amountOwed in
+    // app.js), so the two screens can never show different numbers for the same client.
+    if (request.method === "GET" && path === "/api/client-summaries") {
+      const today = nairobiTodayISO();
+      const [cl, pay, sch] = await Promise.all([
+        env.DB.prepare("SELECT id, name, business, plan, amount, status, next_due, ended_date, subaccount_paused FROM clients").all(),
+        env.DB.prepare("SELECT client_id, amount, paid_on FROM payments ORDER BY paid_on DESC, id DESC").all(),
+        env.DB.prepare("SELECT client_id, amount, due_date, description, paid_on FROM scheduled_payments WHERE paid_on IS NULL").all(),
+      ]);
+      const payments = pay.results || [];
+      const lines = sch.results || [];
+      const summaries = (cl.results || []).map((c) => {
+        const mine = payments.filter((p) => p.client_id === c.id);
+        const paidTotal = mine.reduce((a, p) => a + (p.amount || 0), 0);
+        const open = lines.filter((s) => s.client_id === c.id);
+        let owed = 0;
+        let since = null;
+        if (c.plan === "one-off") {
+          owed = Math.max(0, (c.amount || 0) - paidTotal);
+          const dueLines = open.filter((s) => s.due_date <= today).map((s) => s.due_date).sort();
+          if (owed > 0 && dueLines.length) since = dueLines[0];
+        } else {
+          const step = c.plan === "quarterly" ? 3 : 1;
+          for (let i = 0; c.next_due && i < 36; i++) {
+            const due = addMonths(c.next_due, step * i);
+            if (due > today) break;
+            // A client who left stops accruing: only cycles that began before they ended
+            // count. Leaving on the renewal day itself means they did not take that period.
+            if (c.status === "churned" && c.ended_date && due >= c.ended_date) break;
+            owed += c.amount || 0;
+          }
+          if (owed > 0) since = c.next_due;
+          for (const s of open) {
+            if (s.due_date > today) continue;
+            owed += s.amount || 0;
+            if (!since || s.due_date < since) since = s.due_date;
+          }
+        }
+        const soon = c.next_due && c.next_due > today && c.next_due <= addDaysISO_(today, 7);
+        const state = c.status === "churned" ? "churned"
+          : c.status === "completed" ? "completed"
+          : c.subaccount_paused ? "paused"
+          : owed > 0 ? "overdue"
+          : soon ? "due-soon"
+          : "paid-up";
+        return {
+          id: c.id, name: c.name, business: c.business, plan: c.plan, amount: c.amount,
+          status: c.status, state, next_due: c.next_due, ended_date: c.ended_date,
+          paused: c.subaccount_paused || null, owed, overdue_since: since,
+          paid_total: paidTotal,
+          last_payment: mine[0] ? { paid_on: mine[0].paid_on, amount: mine[0].amount } : null,
+          open_lines: open.map((s) => ({ description: s.description, amount: s.amount, due_date: s.due_date })),
+        };
+      });
+      return json({ today, summaries });
+    }
+
     if (request.method === "POST" && path === "/api/clients") {
       const body = await readBody(request);
       const err = validateClient(body);
