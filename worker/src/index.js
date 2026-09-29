@@ -1045,7 +1045,7 @@ async function runOverdueDigest(env) {
 
   // Unpaid scheduled payments (deposit/balance) that are overdue or due soon.
   const sp = await env.DB.prepare(
-    "SELECT s.*, c.name AS client_name, c.plan AS client_plan, c.amount AS client_amount, (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE client_id = c.id) AS client_paid FROM scheduled_payments s JOIN clients c ON c.id = s.client_id WHERE s.paid_on IS NULL ORDER BY s.due_date ASC"
+    "SELECT s.*, c.name AS client_name, c.plan AS client_plan, c.amount AS client_amount, (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE client_id = c.id) AS client_paid FROM scheduled_payments s JOIN clients c ON c.id = s.client_id WHERE s.paid_on IS NULL AND c.status != 'churned' ORDER BY s.due_date ASC"
   ).all();
   let scheduled = sp.results || [];
   // A one-off's balance is derived (total − everything paid). Overwrite the stored

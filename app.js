@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260929-remind';
+const APP_VERSION = '20260929-churnlines';
 
 // Days after next_due before a lapsed catalog/gym client is auto-paused. The
 // morning digest warns "auto-pauses tonight" on day === GRACE; the browser
@@ -363,7 +363,9 @@ function upcomingItems() {
   for (const s of state.scheduled_payments) {
     if (s.paid_on) continue;
     const c = state.clients.find((x) => x.id === s.client_id);
-    if (!c) continue;
+    // A churned client's open lines stay on file (they may come back) but stop
+    // showing in Overdue, Upcoming and the banner, same as their recurring bill.
+    if (!c || c.status === 'churned') continue;
     const outstanding = scheduledOutstanding(s); // derived for one-off, stored otherwise
     if (outstanding <= 0) continue;              // one-off already settled
     items.push({
