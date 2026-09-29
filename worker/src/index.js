@@ -448,7 +448,8 @@ const worker = {
         const state = c.status === "churned" ? "churned"
           : c.status === "completed" ? "completed"
           : c.subaccount_paused ? "paused"
-          : owed > 0 ? "overdue"
+          // Owed from today is due, not late: same line the dashboard draws (next_due < today).
+          : owed > 0 ? (since && since < today ? "overdue" : "due-today")
           : soon ? "due-soon"
           : "paid-up";
         return {
