@@ -22,6 +22,8 @@
 // Auth: every endpoint except /api/health requires `Authorization: Bearer <ADMIN_TOKEN>`.
 // Set the token: npx wrangler secret put ADMIN_TOKEN
 
+import { WorkerEntrypoint } from "cloudflare:workers";
+
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
@@ -340,7 +342,7 @@ async function generateReminder(env, client, stage) {
   return msg;
 }
 
-export default {
+const worker = {
   async fetch(request, env) {
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
 
@@ -929,6 +931,25 @@ export default {
     })());
   },
 };
+
+export default worker;
+
+// Internal door for the agency CRM (Sales Manager/agency), reached ONLY through its BILLING
+// service binding with entrypoint = "InternalAPI". An RPC class has no URL, so nothing on the
+// internet can call it, and no billing credential has to be copied into the CRM: it runs the
+// same routes as the public API, authenticated with billing's own token from inside this
+// Worker. The CRM decides who may call it (agency owners, never on a client's domain); this
+// side trusts the binding, exactly as the AI inbox does for the same CRM.
+export class InternalAPI extends WorkerEntrypoint {
+  async call(method, path, body) {
+    const m = String(method || "GET").toUpperCase();
+    if (!/^\/api\//.test(String(path || ""))) return { status: 400, body: JSON.stringify({ error: "bad path" }) };
+    const init = { method: m, headers: { Authorization: `Bearer ${this.env.ADMIN_TOKEN}`, "Content-Type": "application/json" } };
+    if (body != null && m !== "GET" && m !== "HEAD") init.body = typeof body === "string" ? body : JSON.stringify(body);
+    const res = await worker.fetch(new Request("https://billing.internal" + path, init), this.env);
+    return { status: res.status, body: await res.text() };
+  }
+}
 
 // ─────────── Referral free months: auto-apply at the next bill ───────────
 // A referrer with free-month credits gets their next due cycle for free: record
