@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260929-churn-due';
+const APP_VERSION = '20260929-owed';
 
 // Days after next_due before a lapsed catalog/gym client is auto-paused. The
 // morning digest warns "auto-pauses tonight" on day === GRACE; the browser
@@ -704,15 +704,43 @@ async function getCatalogToken() {
 // level ("admin" | "full") is how hard we squeeze: "admin" freezes only the owner's
 // admin and leaves her storefront live for customers; "full" also takes the public
 // site offline. Omitted = full (the catalog's default), which is right for prospects.
+// What a client owes today: every billing cycle whose due date has passed
+// without payment, plus any open scheduled line (set-up, deposit, balance)
+// already due. A one-off's balance is derived from its total, so its scheduled
+// lines are already inside that figure and are not added again.
+function amountOwed(c) {
+  const today = todayISO();
+  if (c.plan === 'one-off') {
+    const paid = state.payments.filter((p) => p.client_id === c.id).reduce((a, p) => a + p.amount, 0);
+    return Math.max(0, (c.amount || 0) - paid);
+  }
+  let owed = 0;
+  const step = c.plan === 'quarterly' ? 3 : 1;
+  // Step from the original due date each time, so month-end dates don't drift.
+  for (let i = 0; c.next_due && i < 36; i++) {
+    if (addMonthsISO(c.next_due, step * i) > today) break;
+    owed += c.amount || 0;
+  }
+  for (const s of state.scheduled_payments) {
+    if (s.client_id === c.id && !s.paid_on && s.due_date <= today) owed += scheduledOutstanding(s);
+  }
+  return owed;
+}
+
 async function catalogSuspend(client, suspended, mode, level) {
   if (!client || !client.catalog_api_base) return;
   const token = await getCatalogToken();
   const body = { suspended: !!suspended };
   if (mode) body.mode = mode;
   if (level) body.level = level;
-  // The date they missed, so the owner's banner can name it. Prospects have no
-  // next_due, so nothing is sent for them. A shop worker without the field ignores it.
-  if (suspended && client.next_due) body.due = client.next_due;
+  // The date they missed and what they owe, so the owner's banner can name both.
+  // Clients only: a prospect has no bill (and its id can collide with a client's).
+  // A worker without these fields ignores them.
+  if (suspended && state.clients.includes(client)) {
+    if (client.next_due) body.due = client.next_due;
+    const owed = amountOwed(client);
+    if (owed > 0) body.owed = owed;
+  }
   const res = await fetch(`${client.catalog_api_base.replace(/\/+$/, '')}/api/suspend`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
