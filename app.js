@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260822-gymlvl';
+const APP_VERSION = '20260929-churn-due';
 
 // Days after next_due before a lapsed catalog/gym client is auto-paused. The
 // morning digest warns "auto-pauses tonight" on day === GRACE; the browser
@@ -710,6 +710,9 @@ async function catalogSuspend(client, suspended, mode, level) {
   const body = { suspended: !!suspended };
   if (mode) body.mode = mode;
   if (level) body.level = level;
+  // The date they missed, so the owner's banner can name it. Prospects have no
+  // next_due, so nothing is sent for them. A shop worker without the field ignores it.
+  if (suspended && client.next_due) body.due = client.next_due;
   const res = await fetch(`${client.catalog_api_base.replace(/\/+$/, '')}/api/suspend`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -1172,16 +1175,21 @@ window.showClientsAddedBreakdown = function (period) {
 };
 
 function renderClientFilter() {
-  const all = state.clients.length;
-  const recurring = state.clients.filter((c) => c.plan === 'monthly' || c.plan === 'quarterly').length;
-  const oneOff = state.clients.filter((c) => c.plan === 'one-off').length;
-  const referrers = state.clients.filter((c) => referralCount(c.id) > 0).length;
+  // Churned clients leave every normal view but stay in the data, so their
+  // payments still count in Revenue. The Churned pill is the only way to see them.
+  const live = state.clients.filter((c) => c.status !== 'churned');
+  const all = live.length;
+  const recurring = live.filter((c) => c.plan === 'monthly' || c.plan === 'quarterly').length;
+  const oneOff = live.filter((c) => c.plan === 'one-off').length;
+  const referrers = live.filter((c) => referralCount(c.id) > 0).length;
+  const churned = state.clients.length - live.length;
   const f = state.clientFilter;
   $('#clientFilter').innerHTML = `
     <button type="button" class="filter-pill${f === 'all' ? ' active' : ''}" data-filter="all">All <span class="filter-count">${all}</span></button>
     <button type="button" class="filter-pill${f === 'recurring' ? ' active' : ''}" data-filter="recurring">Recurring <span class="filter-count">${recurring}</span></button>
     <button type="button" class="filter-pill${f === 'one-off' ? ' active' : ''}" data-filter="one-off">One off <span class="filter-count">${oneOff}</span></button>
     <button type="button" class="filter-pill${f === 'referrers' ? ' active' : ''}" data-filter="referrers">Referrers <span class="filter-count">${referrers}</span></button>
+    ${churned ? `<button type="button" class="filter-pill${f === 'churned' ? ' active' : ''}" data-filter="churned">Churned <span class="filter-count">${churned}</span></button>` : ''}
   `;
 }
 
@@ -1250,6 +1258,8 @@ function renderClientsList() {
   }
   const q = (state.clientSearch || '').trim().toLowerCase();
   const filtered = state.clients.filter((c) => {
+    // Churned only ever shows under its own pill.
+    if ((c.status === 'churned') !== (state.clientFilter === 'churned')) return false;
     if (state.clientFilter === 'recurring' && !(c.plan === 'monthly' || c.plan === 'quarterly')) return false;
     if (state.clientFilter === 'one-off' && c.plan !== 'one-off') return false;
     if (state.clientFilter === 'referrers' && referralCount(c.id) === 0) return false;

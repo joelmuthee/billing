@@ -188,7 +188,13 @@ async function recordClientPayment(env, body) {
     await env.DB.prepare("UPDATE scheduled_payments SET paid_on = ?, payment_id = ? WHERE id = ? AND client_id = ?")
       .bind(body.paid_on, paymentId, body.scheduled_payment_id, body.client_id).run();
   }
-  const newNextDue = bumpNextDue(client.plan, client.next_due, body.paid_on);
+  // A payment against a specific scheduled item (a deposit, a balance, a short
+  // month) settles THAT item, not the recurring cycle, so it must not push a
+  // recurring client's next_due forward a whole period.
+  const settlesScheduledOnly = Number.isInteger(body.scheduled_payment_id) && client.plan !== "one-off";
+  const newNextDue = settlesScheduledOnly
+    ? client.next_due
+    : bumpNextDue(client.plan, client.next_due, body.paid_on);
   let newStatus = client.status;
   if (client.plan !== "one-off" && client.status === "paused") newStatus = "active";
   if (client.plan === "one-off") {
