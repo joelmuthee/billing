@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260929-owed';
+const APP_VERSION = '20260929-remind';
 
 // Days after next_due before a lapsed catalog/gym client is auto-paused. The
 // morning digest warns "auto-pauses tonight" on day === GRACE; the browser
@@ -187,6 +187,9 @@ async function loadData() {
     _autoPauseChecked = true;
     autoPauseLapsed();
   }
+  // Every reload, since a payment or an edit may have moved someone's due date.
+  // Only pushes what changed, so this is cheap.
+  syncBillingNotices();
 }
 let _autoPauseChecked = false;
 
@@ -725,6 +728,31 @@ function amountOwed(c) {
     if (s.client_id === c.id && !s.paid_on && s.due_date <= today) owed += scheduledOutstanding(s);
   }
   return owed;
+}
+
+// Hand each active client's shop its next due date and bill, so its admin can
+// show a reminder from 2 days out without billing having to be open that day.
+// A due date only moves when a payment is recorded or the client is edited,
+// both of which happen here, so pushing on change is enough. Browser-side for
+// the same reason as catalogSuspend (worker to worker is CF error 1042). A
+// worker without the endpoint just 404s, which is ignored.
+const _noticePushed = {};
+async function syncBillingNotices() {
+  const due = state.clients.filter((c) => c.status === 'active' && c.catalog_api_base && c.plan !== 'one-off' && c.next_due);
+  if (!due.length) return;
+  let token;
+  try { token = await getCatalogToken(); } catch { return; }
+  for (const c of due) {
+    const amount = Math.max(amountOwed(c), c.amount || 0);
+    const key = `${c.next_due}|${amount}`;
+    if (_noticePushed[c.id] === key) continue;
+    _noticePushed[c.id] = key;
+    fetch(`${c.catalog_api_base.replace(/\/+$/, '')}/api/billing-notice`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ due: c.next_due, amount }),
+    }).catch(() => {});
+  }
 }
 
 async function catalogSuspend(client, suspended, mode, level) {
