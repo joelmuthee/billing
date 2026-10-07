@@ -411,12 +411,13 @@ const worker = {
     if (request.method === "GET" && path === "/api/client-summaries") {
       const today = nairobiTodayISO();
       const [cl, pay, sch] = await Promise.all([
-        env.DB.prepare("SELECT id, name, business, plan, amount, status, next_due, ended_date, subaccount_paused FROM clients").all(),
+        env.DB.prepare("SELECT id, name, business, plan, amount, status, next_due, ended_date, subaccount_paused, referred_by, catalog_api_base FROM clients").all(),
         env.DB.prepare("SELECT client_id, amount, paid_on FROM payments ORDER BY paid_on DESC, id DESC").all(),
         env.DB.prepare("SELECT client_id, amount, due_date, description, paid_on FROM scheduled_payments WHERE paid_on IS NULL").all(),
       ]);
       const payments = pay.results || [];
       const lines = sch.results || [];
+      const byId = new Map((cl.results || []).map((c) => [c.id, c]));
       const summaries = (cl.results || []).map((c) => {
         const mine = payments.filter((p) => p.client_id === c.id);
         const paidTotal = mine.reduce((a, p) => a + (p.amount || 0), 0);
@@ -456,9 +457,14 @@ const worker = {
           id: c.id, name: c.name, business: c.business, plan: c.plan, amount: c.amount,
           status: c.status, state, next_due: c.next_due, ended_date: c.ended_date,
           paused: c.subaccount_paused || null, owed, overdue_since: since,
+          has_site: !!c.catalog_api_base,   // a shop or gym the client's card can pause
           paid_total: paidTotal,
           last_payment: mine[0] ? { paid_on: mine[0].paid_on, amount: mine[0].amount } : null,
           open_lines: open.map((s) => ({ description: s.description, amount: s.amount, due_date: s.due_date })),
+          // Who sent them, by person AND business: "Purity" alone does not say Purple Bear.
+          referred_by: c.referred_by && byId.has(c.referred_by)
+            ? { id: c.referred_by, name: byId.get(c.referred_by).name, business: byId.get(c.referred_by).business || null }
+            : null,
         };
       });
       return json({ today, summaries });

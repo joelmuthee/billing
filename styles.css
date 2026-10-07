@@ -366,6 +366,10 @@ input:-webkit-autofill { -webkit-text-fill-color: var(--ink); box-shadow: 0 0 0 
   white-space: nowrap;
 }
 .list-row .actions { display: flex; gap: 6px; align-items: center; }
+/* A grid item defaults to min-width:auto and will not shrink below its content, so one long
+   badge made a whole row wider than a 320px phone and the list's overflow:hidden quietly cut
+   the Edit button off (St. Christopher's, 2026-10-07). */
+.list-row > * { min-width: 0; }
 .list-row.danger .amount { color: var(--red); }
 .list-row .date {
   color: var(--muted);
@@ -386,7 +390,11 @@ input:-webkit-autofill { -webkit-text-fill-color: var(--ink); box-shadow: 0 0 0 
   color: var(--body);
   border: 1px solid var(--line);
   white-space: nowrap;
+  max-width: 100%;
 }
+/* Short badges stay on one line; a long one (an overdue scheduled line names the whole job)
+   wraps inside the row instead of widening it. */
+.list-row .badge { white-space: normal; overflow-wrap: anywhere; }
 .badge.warn { background: var(--amber-soft); color: var(--amber); border-color: #eddcb8; }
 .badge.danger { background: var(--red-soft); color: var(--red); border-color: #eacfc6; }
 .badge.ok { background: var(--green-soft); color: var(--green); border-color: #cfe6d8; }
@@ -883,3 +891,7 @@ button.filter-pill.active .filter-count { background: #fff; color: var(--brand-d
 @media (max-width: 340px) {
   .kpi-row { grid-template-columns: 1fr; }
 }
+
+/* Pointer to the CRM, where these screens now live (2026-10-07). */
+.moved-banner { background: var(--brand-soft); border-bottom: 1px solid var(--brand-line); color: var(--ink); padding: 9px 20px; font-size: 13.5px; text-align: center; }
+.moved-banner a { color: var(--brand-deep); font-weight: 700; }

@@ -5,7 +5,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const API_BASE = 'https://clients-dashboard-api.stawisystems.workers.dev';
-const APP_VERSION = '20260929-churnlines';
+const APP_VERSION = '20261007-crm';
 
 // Days after next_due before a lapsed catalog/gym client is auto-paused. The
 // morning digest warns "auto-pauses tonight" on day === GRACE; the browser
@@ -426,6 +426,13 @@ function firstName(c) {
 function clientNameById(id) {
   const c = state.clients.find((x) => x.id === id);
   return c ? c.name : 'Unknown';
+}
+// "Purity · Purple Bear": the person and the business, because first names alone are
+// ambiguous (Joe, Joyce, Janet) and say nothing about which client sent somebody.
+function clientLabelById(id) {
+  const c = state.clients.find((x) => x.id === id);
+  if (!c) return 'Unknown';
+  return c.business && c.business !== c.name ? `${c.name} · ${c.business}` : c.name;
 }
 function referralCount(id) {
   return state.clients.filter((x) => x.referred_by === id).length;
@@ -1359,7 +1366,7 @@ function renderClientsList() {
             ${c.source ? `<span class="badge muted">via ${escapeHtml(c.source)}</span>` : ''}
             ${c.free_months > 0 ? `<span class="badge ok" title="Referral credit, auto-applied at next bill">🎁 ${c.free_months} free month${c.free_months === 1 ? '' : 's'}</span>` : ''}
             ${referralCount(c.id) > 0 ? `<span class="badge muted" style="cursor:pointer;" onclick="showReferrals(${c.id})" title="See who they referred">${referralCount(c.id)} referral${referralCount(c.id) === 1 ? '' : 's'} ↗</span>` : ''}
-            ${c.referred_by ? `<span class="muted-2">referred by ${escapeHtml(clientNameById(c.referred_by))}</span>` : ''}
+            ${c.referred_by ? `<span class="muted-2">referred by ${escapeHtml(clientLabelById(c.referred_by))}</span>` : ''}
           </div>
           ${chips ? `<div class="chips">${chips}</div>` : ''}
           ${schedBreakdown(c)}
@@ -2805,7 +2812,7 @@ function clientFormHtml(c) {
   const isEdit = !!c;
   const refOpts = state.clients
     .filter((x) => !isEdit || x.id !== c.id)
-    .map((x) => `<option value="${x.id}" ${isEdit && c.referred_by === x.id ? 'selected' : ''}>${escapeAttr(x.name)}</option>`)
+    .map((x) => `<option value="${x.id}" ${isEdit && c.referred_by === x.id ? 'selected' : ''}>${escapeAttr(clientLabelById(x.id))}</option>`)
     .join('');
   return `
     <h2>${isEdit ? 'Edit client' : 'Add client'}</h2>

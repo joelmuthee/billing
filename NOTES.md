@@ -256,3 +256,30 @@ Drop the file into `C:\Users\Joel\Website Backups\clients-dashboard\`.
 - **Deleting a payment does NOT roll back the client's `next_due` bump.** Edit the client to fix the date manually.
 - **Churn/pause keeps history via `ended_date`; don't delete a client to "stop" them.** Delete cascades their payments and erases them from past revenue. Churn (status + "Ended on") preserves all of it. Set "Ended on" to the last paid month-end so the final payment counts once, not twice.
 - **D1 free tier**: 100k reads/day, 50k writes/day. You'll never hit this for billing.
+
+## This front-end also runs inside the CRM (2026-10-07)
+
+Billing's screens now live in the agency CRM (agency.essenceautomations.com, Essence Automations
+workspace, **Clients** and **Billing** tabs). They are not a copy: the CRM's
+`tools/build_billing.mjs` reads `app.js`, `index.html` (the `<main>` block and the modal) and
+`styles.css` from this folder and generates the CRM's `billing.js` / `billing.css`.
+
+**So a change here is a change in two places.** After editing any of those three files:
+
+1. Deploy this site as before (it still works, with a banner pointing to the CRM).
+2. In `Sales Manager/agency`: `node tools/build_billing.mjs`, bump the `?v=` numbers in its
+   `index.html`, deploy its Worker.
+
+Things the build depends on, so do not rename them without updating it: `const $ = (sel, root =
+document)`, the `api()` url and Authorization lines, the login form and logout listeners, the
+`.tab` / `.tab-panel` / `data-tab` nav, `function toast(msg, kind = 'ok') {`, and the `<main
+class="main">` and `<div id="modalBackdrop"` ... `</datalist>` markup blocks. The build stops
+with a clear error if any of them stop matching.
+
+The **Worker** here is unchanged and still the books' engine: the CRM reaches it through its
+`InternalAPI` binding. `/api/client-summaries` now also returns `referred_by` (person and
+business) and `has_site`, which the CRM card uses.
+
+Two fixes made on the way, which apply to this site too: a long badge (an overdue scheduled
+line names the whole job) no longer forces a client row wider than a phone and hides its Edit
+button, and the referrer reads "Purity · Purple Bear" on the row and in the edit form.

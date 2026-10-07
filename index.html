@@ -11,7 +11,7 @@
   <!-- Matches the white app header, not the brand colour: set to the brand, Chrome's address
        bar merges into the header and the two read as one odd block. -->
   <meta name="theme-color" content="#ffffff">
-  <link rel="stylesheet" href="styles.css?v=20260731-crm">
+  <link rel="stylesheet" href="styles.css?v=20261007-crm">
 </head>
 <body>
 
@@ -34,6 +34,8 @@
 
   <!-- App -->
   <div id="app" class="hidden">
+    <!-- Outside <main> on purpose: the CRM's build copies only <main>, so this shows here only. -->
+    <div class="moved-banner">Billing now lives in your CRM. Open <a href="https://agency.essenceautomations.com">agency.essenceautomations.com</a> and use the <b>Clients</b> and <b>Billing</b> tabs.</div>
     <header class="header">
       <div class="brand">
         <img src="assets/logo.png" alt="" class="brand-logo">
@@ -233,6 +235,6 @@
     <option value="TikTok"></option>
   </datalist>
 
-  <script src="app.js?v=20260929-churnlines"></script>
+  <script src="app.js?v=20261007-crm"></script>
 </body>
 </html>
