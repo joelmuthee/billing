@@ -411,7 +411,7 @@ const worker = {
     if (request.method === "GET" && path === "/api/client-summaries") {
       const today = nairobiTodayISO();
       const [cl, pay, sch] = await Promise.all([
-        env.DB.prepare("SELECT id, name, business, plan, amount, status, next_due, ended_date, subaccount_paused, referred_by, catalog_api_base FROM clients").all(),
+        env.DB.prepare("SELECT id, name, business, plan, amount, status, next_due, ended_date, subaccount_paused, referred_by, catalog_api_base, services FROM clients").all(),
         env.DB.prepare("SELECT client_id, amount, paid_on FROM payments ORDER BY paid_on DESC, id DESC").all(),
         env.DB.prepare("SELECT client_id, amount, due_date, description, paid_on FROM scheduled_payments WHERE paid_on IS NULL").all(),
       ]);
@@ -458,6 +458,7 @@ const worker = {
           status: c.status, state, next_due: c.next_due, ended_date: c.ended_date,
           paused: c.subaccount_paused || null, owed, overdue_since: since,
           has_site: !!c.catalog_api_base,   // a shop or gym the client's card can pause
+          is_gym: /"gym-manager"/.test(c.services || ""),
           paid_total: paidTotal,
           last_payment: mine[0] ? { paid_on: mine[0].paid_on, amount: mine[0].amount } : null,
           open_lines: open.map((s) => ({ description: s.description, amount: s.amount, due_date: s.due_date })),
