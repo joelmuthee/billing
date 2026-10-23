@@ -228,9 +228,11 @@ When you open the dashboard, a strip at the top of the Dashboard tab summarises 
 cd worker
 npx wrangler deploy
 
-# Front-end changes
+# Front-end changes: ONLY with the script. `pages deploy .` publishes NOTES.md, the playbook
+# and the Worker source (it ignores .gitignore); the script ships the six front-end files and
+# then proves NOTES.md, the Worker source and .env are not served.
 cd ..
-npx wrangler pages deploy . --project-name=billing --branch=master --commit-dirty=true
+powershell -File tools\deploy_pages.ps1
 ```
 
 ## Schema migrations later
@@ -283,3 +285,40 @@ business) and `has_site`, which the CRM card uses.
 Two fixes made on the way, which apply to this site too: a long badge (an overdue scheduled
 line names the whole job) no longer forces a client row wider than a phone and hides its Edit
 button, and the referrer reads "Purity · Purple Bear" on the row and in the edit form.
+
+## Invoices (regular, non-eTIMS), 2026-10-23
+
+For clients whose **Invoice type** is **Regular invoice**. eTIMS clients still get theirs from
+the KRA portal and keep "Mark KRA invoiced".
+
+- **Where:** "+ Create invoice" on a regular-invoice bill under Today (and on scheduled lines such
+  as a setup or balance), "Invoice" on the client's row under Clients, "Create invoice" on the
+  client's card in the CRM. Billing > **Invoices** lists every invoice to reopen, cancel or restore.
+- **Prefilled:** every unpaid bill becomes its own line ("Shop Manager, monthly subscription.
+  7 November to 6 December 2026"), oldest first, so a client two months behind is asked for both.
+  The client's PIN and address come from their previous invoice. Lines are editable.
+- **Saving marks that bill invoiced** (the same flag as "Mark invoiced") and the row shows
+  "View invoice". "Just mark it invoiced" in the form covers an invoice sent another way.
+- **Numbers** come from the server: `prefix` + 4 digits (EA-0001), one INSERT per number with
+  `seq` UNIQUE, so simultaneous invoices cannot share one (tested with five at once). "First number"
+  in your details continues an older series (only used if higher than the last).
+- **Cancel, never delete.** The number stays used; the bill goes back to "invoice needed", and
+  restoring puts it back, but only while that bill is still the client's next one.
+- **Frozen copies.** Each invoice stores its own copy of your details, the client's and the lines,
+  so changing your phone or payment details later never rewrites an invoice already sent.
+- **Your invoice details** (Billing > Invoices > "Your invoice details"): name, business, KRA PIN,
+  phone, email, address, how clients pay you, bottom line, prefix, first number. Prefilled from the
+  eTIMS invoices on the desktop; **how clients pay you is deliberately empty and required**, and the
+  first "Create invoice" asks for it before anything else.
+- **Printing:** the invoice opens inside the app in its own frame, not a pop-up (many phone browsers
+  and home-screen apps block pop-ups, and the Claude browser pane never allows them). "Print or save
+  as PDF" prints only the invoice and names the PDF after the number and client; "Open in a new tab"
+  is the fallback for a phone that prints frames oddly.
+
+Tables: `invoices`, `invoice_settings` (migration 017, also in `schema.sql`). Endpoints:
+`GET/PUT /api/invoice-settings`, `POST /api/invoices`, `POST /api/invoices/<id>/void` (`{undo:true}`
+restores); invoices ride along in `/api/data`.
+
+**`schema.sql` has drifted before this change**: it has no `sms_payments`, `pay_names`, `pausable`
+or `expects_sms` (migrations 014-016). Rebuild it from the live structure before provisioning a
+new database from it.
