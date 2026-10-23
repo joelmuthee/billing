@@ -46,6 +46,7 @@
         <button class="tab" data-tab="prospects">Prospects</button>
         <button class="tab" data-tab="clients">Clients</button>
         <button class="tab" data-tab="payments">Payments</button>
+        <button class="tab" data-tab="invoices">Invoices</button>
         <button class="tab" data-tab="expenses">Expenses</button>
         <button class="tab" data-tab="revenue">Revenue</button>
       </nav>
@@ -214,6 +215,16 @@
           </div>
           <div id="topClients"></div>
         </div>
+      </section>
+
+      <!-- Invoices -->
+      <section id="tab-invoices" class="tab-panel">
+        <div class="row-between">
+          <h2>Invoices</h2>
+          <button class="btn-ghost" onclick="editInvoiceSettings()">Your invoice details</button>
+        </div>
+        <p class="muted inv-intro">For clients on a regular invoice. eTIMS invoices still come from the KRA portal.</p>
+        <div class="card no-pad" id="invoicesList"></div>
       </section>
 
     </main>

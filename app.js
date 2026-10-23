@@ -179,6 +179,7 @@ async function loadData() {
   state.scheduled_payments = data.scheduled_payments || [];
   state.prospects = data.prospects || [];
   state.sms_inbox = data.sms_inbox || [];
+  state.invoices = data.invoices || [];
   renderAll();
   // Once per session, after the first render, sweep for lapsed clients past the
   // grace period and take their sites offline. Fire-and-forget so it never blocks
@@ -319,6 +320,7 @@ function renderAll() {
   renderProspects();
   renderPaymentsList();
   renderExpenses();
+  renderInvoices();
   if (state.activeTab === 'revenue') renderRevenue();
 }
 
@@ -643,10 +645,14 @@ function invoiceToggleButton(it) {
   if (type === 'none') return ''; // no invoicing for this client
   const isKra = type === 'kra';
   const idArg = it.kind === 'scheduled' ? it.scheduled.id : it.client.id;
+  // A bill invoiced from here opens its invoice; cancelling that invoice is the undo.
+  const made = !isKra && invoiceFor(it.kind, it.kind === 'scheduled' ? it.scheduled.id : it.client.next_due);
+  if (made) return `<button class="btn-sm" onclick="viewInvoice(${made.id})">View invoice</button>`;
   if (it.invoiceSent) {
     return `<button class="btn-sm" onclick="toggleInvoice('${it.kind}', ${idArg}, true)" title="Mark as not invoiced (undo)">↩ Undo</button>`;
   }
-  return `<button class="btn-sm invoice-cta" onclick="toggleInvoice('${it.kind}', ${idArg}, false)">+ ${isKra ? 'Mark KRA invoiced' : 'Mark invoiced'}</button>`;
+  if (!isKra) return `<button class="btn-sm invoice-cta" onclick="createInvoice('${it.kind}', ${idArg})">+ Create invoice</button>`;
+  return `<button class="btn-sm invoice-cta" onclick="toggleInvoice('${it.kind}', ${idArg}, false)">+ Mark KRA invoiced</button>`;
 }
 
 function upcomingRowHtml(it, kind) {
@@ -1374,6 +1380,8 @@ function renderClientsList() {
         <div class="actions">
           <div class="amount num">${fmtKES(c.amount)}</div>
           <button class="btn-sm" onclick="quickPay(${c.id})">Pay</button>
+          ${(c.invoice_type || 'regular') === 'regular' && c.status !== 'churned'
+            ? `<button class="btn-sm" onclick="createInvoice('client', ${c.id})">Invoice</button>` : ''}
           ${c.catalog_api_base
             ? (c.subaccount_paused
               ? `<button class="btn-sm" onclick="resumeSubaccount(${c.id})" title="${pauseWording(c).resumeTitle}">Resume ${pauseWording(c).label}</button>`
@@ -3934,6 +3942,427 @@ function escapeHtml(s) {
   }[c]));
 }
 function escapeAttr(s) { return escapeHtml(s); }
+
+// ────────── Invoices (regular, non-eTIMS) ──────────
+// For clients whose Invoice type is "Regular invoice". eTIMS clients still get theirs from the
+// KRA portal and keep "Mark KRA invoiced". A saved invoice is a frozen copy, numbered by the
+// server, so opening it again next year shows exactly what was sent.
+
+let _invSettings = null;
+async function getInvoiceSettings(force) {
+  if (_invSettings && !force) return _invSettings;
+  const r = await api('/api/invoice-settings');
+  _invSettings = r.settings;
+  return _invSettings;
+}
+
+const fmtDateLong = (iso) => {
+  const d = parseISO(iso);
+  return d ? d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : '';
+};
+const fmtInvMoney = (n) => 'KES ' + (Math.round(Number(n || 0) * 100) / 100)
+  .toLocaleString('en-KE', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+
+function invoiceServiceText(c) {
+  const labels = (Array.isArray(c.services) ? c.services : []).map((v) => SERVICE_LABEL[v]).filter(Boolean);
+  return labels.length ? labels.join(', ') : 'Services';
+}
+function invoiceCycleLine(c, due) {
+  const months = c.plan === 'quarterly' ? 3 : 1;
+  const end = addDaysISO(addMonthsISO(due, months), -1);
+  // "7 November to 6 December 2026", the year said once when both dates share it.
+  const from = due.slice(0, 4) === end.slice(0, 4)
+    ? parseISO(due).toLocaleDateString('en-GB', { day: 'numeric', month: 'long' })
+    : fmtDateLong(due);
+  return {
+    description: `${invoiceServiceText(c)}, ${c.plan} subscription. ${from} to ${fmtDateLong(end)}`,
+    qty: 1, price: c.amount || 0,
+  };
+}
+// The client's PIN and address from their last invoice, so they are typed once.
+function lastBillTo(clientId) {
+  const inv = (state.invoices || []).find((i) => i.client_id === clientId);
+  return (inv && inv.bill_to) || {};
+}
+// The live invoice for a bill, if one was made for it.
+function invoiceFor(kind, ref) {
+  return (state.invoices || []).find((i) => !i.voided_at && i.for_kind === kind && String(i.for_ref) === String(ref));
+}
+
+// What a new invoice starts with. kind: 'recurring' (a client's bill), 'scheduled' (a setup or
+// balance line) or 'client' (from the client list or card: their current bill, if any).
+function invoiceDefaults(kind, id) {
+  if (kind === 'scheduled') {
+    const s = state.scheduled_payments.find((x) => x.id === id);
+    const c = s && state.clients.find((x) => x.id === s.client_id);
+    if (!c) return null;
+    return { client: c, due: s.due_date, forKind: 'scheduled', forRef: String(s.id),
+      lines: [{ description: s.description || 'Scheduled payment', qty: 1, price: scheduledOutstanding(s) }] };
+  }
+  const c = state.clients.find((x) => x.id === id);
+  if (!c) return null;
+  if (c.plan !== 'one-off' && c.next_due) {
+    // Every bill still unpaid gets its own line, oldest first: a client two months behind is
+    // asked for both months, not one.
+    const step = c.plan === 'quarterly' ? 3 : 1;
+    const today = todayISO();
+    const lines = [];
+    for (let i = 0; i < 12; i++) {
+      const due = addMonthsISO(c.next_due, step * i);
+      if (i > 0 && due > today) break;
+      lines.push(invoiceCycleLine(c, due));
+    }
+    return { client: c, due: c.next_due, forKind: 'recurring', forRef: c.next_due, lines };
+  }
+  const owed = amountOwed(c);
+  return { client: c, due: todayISO(), forKind: null, forRef: null,
+    lines: [{ description: invoiceServiceText(c), qty: 1, price: owed > 0 ? owed : (c.amount || 0) }] };
+}
+
+window.createInvoice = async function (kind, id) {
+  const d = invoiceDefaults(kind, id);
+  if (!d) return toast('Client not found', 'error');
+  let settings;
+  try { settings = await getInvoiceSettings(); } catch (err) { return toast(err.message, 'error'); }
+  // No invoice goes out without saying how to pay it.
+  if (!settings.how_to_pay) return editInvoiceSettings(() => window.createInvoice(kind, id), true);
+  const c = d.client;
+  const prev = lastBillTo(c.id);
+  const today = todayISO();
+  openModal(`
+    <h2>New invoice</h2>
+    <p class="muted" style="margin-bottom:14px;">For ${escapeHtml(clientLabelById(c.id))}. Check the lines, then save. It takes the next invoice number and opens ready to print or save as a PDF.</p>
+    <form id="invoiceForm">
+      <div class="form-section-title">Bill to</div>
+      <div class="form-row">
+        <label><span>Business</span><input name="business" value="${escapeAttr(c.business || '')}"></label>
+        <label><span>Contact name</span><input name="name" value="${escapeAttr(c.name || '')}"></label>
+      </div>
+      <div class="form-row">
+        <label><span>Phone</span><input name="phone" value="${escapeAttr(c.phone || '')}"></label>
+        <label><span>Email</span><input name="email" type="email" value="${escapeAttr(c.email || '')}"></label>
+      </div>
+      <div class="form-row">
+        <label><span>Their KRA PIN <span class="hint">(optional)</span></span><input name="pin" value="${escapeAttr(prev.pin || '')}"></label>
+        <label><span>Their address <span class="hint">(optional)</span></span><input name="address" value="${escapeAttr(prev.address || '')}"></label>
+      </div>
+      <div class="form-row">
+        <label><span>Invoice date</span><input type="date" name="issue_date" value="${today}" required></label>
+        <label><span>Due date</span><input type="date" name="due_date" value="${d.due && d.due >= today ? d.due : today}"></label>
+      </div>
+      <div class="form-section">
+        <div class="form-section-title">What it is for</div>
+        <div id="invLines"></div>
+        <button type="button" class="btn-sm" id="invAddLine">+ Add a line</button>
+        <div class="inv-total"><span>Total</span><b id="invTotal"></b></div>
+      </div>
+      <label><span>Note on the invoice <span class="hint">(optional)</span></span><textarea name="notes" rows="2"></textarea></label>
+      <p class="muted inv-from">From ${escapeHtml(settings.business_name || settings.seller_name)}. <button type="button" class="inv-link" id="invEditDetails">Change your invoice details</button></p>
+      ${d.forKind ? `<p class="muted inv-from">Sent this one another way? <button type="button" class="inv-link" id="invMarkOnly">Just mark it invoiced</button></p>` : ''}
+      <p class="error hidden" id="invoiceErr"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn-ghost" onclick="closeModal()">Cancel</button>
+        <button type="submit" class="btn-primary">Save and open</button>
+      </div>
+    </form>`, 'drawer');
+
+  let lines = d.lines.map((l) => ({ ...l }));
+  const box = $('#invLines');
+  const drawLines = () => {
+    box.innerHTML = lines.map((l, i) => `
+      <div class="inv-line" data-i="${i}">
+        <label class="inv-desc"><span>Description</span><input data-k="description" value="${escapeAttr(l.description)}"></label>
+        <label class="inv-qty"><span>Qty</span><input data-k="qty" type="number" min="0" step="any" value="${escapeAttr(l.qty)}"></label>
+        <label class="inv-price"><span>Price (KES)</span><input data-k="price" type="number" min="0" step="any" value="${escapeAttr(l.price)}"></label>
+        <button type="button" class="btn-sm danger inv-del" data-del="${i}" title="Remove this line"${lines.length === 1 ? ' disabled' : ''}>Remove</button>
+      </div>`).join('');
+    drawTotal();
+  };
+  const drawTotal = () => {
+    $('#invTotal').textContent = fmtInvMoney(lines.reduce((a, l) => a + (Number(l.qty) || 0) * (Number(l.price) || 0), 0));
+  };
+  box.addEventListener('input', (e) => {
+    const row = e.target.closest('.inv-line');
+    if (!row || !e.target.dataset.k) return;
+    lines[Number(row.dataset.i)][e.target.dataset.k] = e.target.value;
+    drawTotal();
+  });
+  box.addEventListener('click', (e) => {
+    const del = e.target.closest('[data-del]');
+    if (!del || lines.length === 1) return;
+    lines.splice(Number(del.dataset.del), 1);
+    drawLines();
+  });
+  $('#invAddLine').addEventListener('click', () => { lines.push({ description: '', qty: 1, price: 0 }); drawLines(); });
+  $('#invEditDetails').addEventListener('click', () => editInvoiceSettings(() => window.createInvoice(kind, id)));
+  const markOnly = $('#invMarkOnly');
+  if (markOnly) markOnly.addEventListener('click', () => {
+    closeModal();
+    toggleInvoice(d.forKind, d.forKind === 'scheduled' ? Number(d.forRef) : c.id, false);
+  });
+  drawLines();
+
+  $('#invoiceForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const fd = new FormData(ev.target);
+    const errEl = $('#invoiceErr');
+    errEl.classList.add('hidden');
+    try {
+      const r = await api('/api/invoices', { method: 'POST', body: JSON.stringify({
+        client_id: c.id,
+        issue_date: fd.get('issue_date'),
+        due_date: fd.get('due_date'),
+        notes: fd.get('notes'),
+        for_kind: d.forKind, for_ref: d.forRef,
+        bill_to: { business: fd.get('business'), name: fd.get('name'), phone: fd.get('phone'),
+          email: fd.get('email'), pin: fd.get('pin'), address: fd.get('address') },
+        lines: lines.map((l) => ({ description: l.description, qty: Number(l.qty), price: Number(l.price) })),
+      }) });
+      closeModal();
+      await loadData();
+      toast(`Invoice ${r.invoice.number} saved`);
+      showInvoice(r.invoice);
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.classList.remove('hidden');
+    }
+  });
+};
+
+// Your own details, as they print on every invoice. Shown first if how-to-pay is still empty.
+window.editInvoiceSettings = async function (then, firstTime) {
+  let s;
+  try { s = await getInvoiceSettings(true); } catch (err) { return toast(err.message, 'error'); }
+  openModal(`
+    <h2>Your invoice details</h2>
+    <p class="muted" style="margin-bottom:14px;">${firstTime
+      ? 'Before your first invoice: check your details and say how clients pay you. This prints on every invoice.'
+      : 'These print on every new invoice. Invoices already made keep the details they were made with.'}</p>
+    <form id="invSettingsForm">
+      <div class="form-row">
+        <label><span>Business name</span><input name="business_name" value="${escapeAttr(s.business_name)}"></label>
+        <label><span>Your name</span><input name="seller_name" value="${escapeAttr(s.seller_name)}"></label>
+      </div>
+      <div class="form-row">
+        <label><span>KRA PIN</span><input name="pin" value="${escapeAttr(s.pin)}"></label>
+        <label><span>Phone</span><input name="phone" value="${escapeAttr(s.phone)}"></label>
+      </div>
+      <div class="form-row">
+        <label><span>Email</span><input name="email" type="email" value="${escapeAttr(s.email)}"></label>
+        <label><span>Address</span><input name="address" value="${escapeAttr(s.address)}"></label>
+      </div>
+      <label><span>How clients pay you</span>
+        <span class="hint">Your M-Pesa till or paybill and account, or bank details. Printed in a box on every invoice.</span>
+        <textarea name="how_to_pay" rows="4" required placeholder="M-Pesa Paybill: ...&#10;Account: ...">${escapeHtml(s.how_to_pay)}</textarea></label>
+      <label><span>Line at the bottom</span><input name="footer" value="${escapeAttr(s.footer)}"></label>
+      <div class="form-row">
+        <label><span>Number starts with</span><input name="prefix" value="${escapeAttr(s.prefix)}"></label>
+        <label><span>First number <span class="hint">(only used if higher than the last)</span></span><input name="start_number" type="number" min="1" step="1" value="${escapeAttr(s.start_number)}"></label>
+      </div>
+      <p class="error hidden" id="invSettingsErr"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn-ghost" onclick="closeModal()">Cancel</button>
+        <button type="submit" class="btn-primary">Save${then ? ' and continue' : ''}</button>
+      </div>
+    </form>`, 'drawer');
+  $('#invSettingsForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const body = Object.fromEntries(new FormData(ev.target).entries());
+    try {
+      const r = await api('/api/invoice-settings', { method: 'PUT', body: JSON.stringify(body) });
+      _invSettings = r.settings;
+      toast('Invoice details saved');
+      if (then) then(); else closeModal();
+    } catch (err) {
+      const e = $('#invSettingsErr'); e.textContent = err.message; e.classList.remove('hidden');
+    }
+  });
+};
+
+window.viewInvoice = function (id) {
+  const inv = (state.invoices || []).find((x) => x.id === id);
+  if (!inv) return toast('Invoice not found', 'error');
+  showInvoice(inv);
+};
+
+// The invoice opens inside the app, in a frame of its own, instead of a pop-up: pop-ups are
+// blocked by many phone browsers and home-screen apps, and an invoice that cannot open is no
+// invoice. The frame keeps the invoice's own styles apart from the app's, and printing it
+// prints only the invoice.
+function showInvoice(inv) {
+  const host = $('#modal').parentElement;   // billing's root in the CRM, the page on its own
+  let ov = host.querySelector('.inv-viewer');
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.className = 'inv-viewer';
+    host.appendChild(ov);
+  }
+  ov.innerHTML = `
+    <div class="inv-viewer-bar">
+      <b>Invoice ${escapeHtml(inv.number)}${inv.voided_at ? ' (cancelled)' : ''}</b>
+      <button type="button" class="btn-primary" data-act="print">Print or save as PDF</button>
+      <button type="button" class="btn-ghost" data-act="tab">Open in a new tab</button>
+      <button type="button" class="btn-ghost" data-act="close">Close</button>
+    </div>
+    <iframe title="Invoice ${escapeAttr(inv.number)}"></iframe>`;
+  const frame = ov.querySelector('iframe');
+  frame.srcdoc = invoiceDocHtml(inv, { embedded: true });
+  ov.hidden = false;
+  const close = () => { ov.hidden = true; ov.innerHTML = ''; document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', onKey);
+  ov.querySelector('.inv-viewer-bar').addEventListener('click', (e) => {
+    const act = e.target.dataset && e.target.dataset.act;
+    if (act === 'close') close();
+    if (act === 'tab') {
+      const w = window.open('', '_blank');
+      if (w) writeInvoiceWindow(w, inv);
+      else toast('This browser blocked the new tab. Use Print or save as PDF instead', 'error');
+    }
+    if (act === 'print') {
+      // The PDF's file name comes from the page title, so lend it the invoice's for a moment.
+      const was = document.title;
+      document.title = frame.contentDocument ? frame.contentDocument.title : was;
+      frame.contentWindow.focus();
+      frame.contentWindow.print();
+      setTimeout(() => { document.title = was; }, 1500);
+    }
+  });
+}
+
+window.voidInvoice = async function (id, undo) {
+  const inv = (state.invoices || []).find((x) => x.id === id);
+  if (!inv) return;
+  if (!undo && !confirm(`Cancel invoice ${inv.number}?\n\nIt stays on file marked CANCELLED and its number is not reused. The bill it was for goes back to "invoice needed".`)) return;
+  try {
+    await api(`/api/invoices/${id}/void`, { method: 'POST', body: JSON.stringify({ undo: !!undo }) });
+    await loadData();
+    toast(undo ? `Invoice ${inv.number} restored` : `Invoice ${inv.number} cancelled`);
+  } catch (err) { toast(err.message, 'error'); }
+};
+
+function writeInvoiceWindow(w, inv) {
+  w.document.open();
+  w.document.write(invoiceDocHtml(inv));
+  w.document.close();
+}
+
+// The invoice itself: a standalone A4 page with its own styles, so it prints the same from the
+// CRM, from billing, on a phone or a laptop. Its title becomes the PDF's file name.
+function invoiceDocHtml(inv, opts = {}) {
+  const s = inv.seller || {}, b = inv.bill_to || {};
+  const e = escapeHtml;
+  const logo = location.origin + '/assets/logo.png';
+  const lines = (inv.lines || []).map((l) => `
+    <tr><td>${e(l.description)}</td><td class="r">${e(l.qty)}</td>
+      <td class="r">${e(fmtInvMoney(l.price))}</td><td class="r">${e(fmtInvMoney(l.qty * l.price))}</td></tr>`).join('');
+  const who = b.business || b.name || 'Client';
+  const lineIf = (v) => (v ? `<div>${e(v)}</div>` : '');
+  return `<!doctype html><html lang="en-GB"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${e(inv.number)} ${e(who)}</title>
+<style>
+  @page { size: A4; margin: 14mm; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #f7f6f2; color: #3d3d3a; font: 14px/1.5 "Segoe UI", -apple-system, Helvetica, Arial, sans-serif; }
+  .bar { position: sticky; top: 0; display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; padding: 10px; background: #fff; border-bottom: 1px solid #e6e3d8; }
+  .bar button { font: inherit; font-weight: 600; padding: 9px 16px; border-radius: 8px; border: 1px solid #e6e3d8; background: #fff; cursor: pointer; }
+  .bar .go { background: #fb6e10; border-color: #c2500a; color: #141414; }
+  .sheet { max-width: 800px; margin: 18px auto; background: #fff; padding: 36px 40px; border: 1px solid #e6e3d8; border-radius: 10px; position: relative; }
+  .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; flex-wrap: wrap; }
+  .logo { height: 46px; border-radius: 7px; background: #0f1216; display: block; }
+  h1 { margin: 0; font-size: 30px; letter-spacing: .5px; color: #141414; text-align: right; }
+  .meta { text-align: right; margin-top: 4px; color: #3d3d3a; }
+  .meta b { color: #141414; }
+  .parties { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin: 28px 0 22px; }
+  .lbl { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #8a8880; margin-bottom: 6px; }
+  .party .name { font-weight: 700; color: #141414; font-size: 15px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+  th { text-align: left; font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: #8a8880; padding: 9px 8px; border-bottom: 2px solid #141414; }
+  td { padding: 11px 8px; border-bottom: 1px solid #e6e3d8; vertical-align: top; }
+  .r { text-align: right; white-space: nowrap; }
+  .totals { display: flex; justify-content: flex-end; margin-top: 14px; }
+  .totals div { min-width: 260px; display: flex; justify-content: space-between; gap: 20px; font-size: 18px; font-weight: 700; color: #141414; background: #fff3ea; border: 1px solid #f6d3b4; border-radius: 8px; padding: 12px 16px; }
+  .pay { margin-top: 26px; border: 1px solid #e6e3d8; border-left: 4px solid #fb6e10; border-radius: 8px; padding: 14px 16px; white-space: pre-line; }
+  .note { margin-top: 16px; white-space: pre-line; }
+  .foot { margin-top: 30px; text-align: center; color: #8a8880; font-size: 13px; }
+  .stamp { position: absolute; top: 130px; left: 50%; transform: translateX(-50%) rotate(-14deg); border: 4px solid #b0492c; color: #b0492c; font-size: 40px; font-weight: 800; letter-spacing: 6px; padding: 4px 18px; border-radius: 10px; opacity: .8; }
+  @media (max-width: 600px) {
+    .sheet { margin: 0; border: 0; border-radius: 0; padding: 22px 16px; }
+    .parties { grid-template-columns: 1fr; gap: 16px; }
+    h1, .meta { text-align: left; }
+    .totals div { min-width: 0; width: 100%; }
+    th:nth-child(2), td:nth-child(2), th:nth-child(3), td:nth-child(3) { display: none; }
+  }
+  @media print {
+    body { background: #fff; }
+    .bar { display: none; }
+    .sheet { margin: 0; max-width: none; border: 0; padding: 0; }
+    th:nth-child(2), td:nth-child(2), th:nth-child(3), td:nth-child(3) { display: table-cell; }
+    .parties { grid-template-columns: 1fr 1fr; }
+    h1, .meta { text-align: right; }
+    * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
+</style></head><body>
+${opts.embedded ? '' : '<div class="bar"><button class="go" onclick="window.print()">Print or save as PDF</button><button onclick="window.close()">Close</button></div>'}
+<div class="sheet">
+  ${inv.voided_at ? '<div class="stamp">CANCELLED</div>' : ''}
+  <div class="head">
+    <img class="logo" src="${e(logo)}" alt="${e(s.business_name || '')}">
+    <div><h1>INVOICE</h1>
+      <div class="meta"><div>Number: <b>${e(inv.number)}</b></div>
+        <div>Date: <b>${e(fmtDateLong(inv.issue_date))}</b></div>
+        ${inv.due_date ? `<div>Due: <b>${e(fmtDateLong(inv.due_date))}</b></div>` : ''}</div></div>
+  </div>
+  <div class="parties">
+    <div class="party"><div class="lbl">From</div>
+      <div class="name">${e(s.business_name || s.seller_name || '')}</div>
+      ${s.business_name && s.seller_name ? lineIf(s.seller_name) : ''}
+      ${s.pin ? `<div>KRA PIN: ${e(s.pin)}</div>` : ''}
+      ${lineIf(s.phone)}${lineIf(s.email)}${lineIf(s.address)}</div>
+    <div class="party"><div class="lbl">Bill to</div>
+      <div class="name">${e(who)}</div>
+      ${b.business && b.name ? lineIf(b.name) : ''}
+      ${b.pin ? `<div>KRA PIN: ${e(b.pin)}</div>` : ''}
+      ${lineIf(b.phone)}${lineIf(b.email)}${lineIf(b.address)}</div>
+  </div>
+  <table><thead><tr><th>Description</th><th class="r">Qty</th><th class="r">Price</th><th class="r">Amount</th></tr></thead>
+    <tbody>${lines}</tbody></table>
+  <div class="totals"><div><span>Total</span><span>${e(fmtInvMoney(inv.total))}</span></div></div>
+  ${s.how_to_pay ? `<div class="pay"><div class="lbl">How to pay</div>${e(s.how_to_pay)}</div>` : ''}
+  ${inv.notes ? `<div class="note"><div class="lbl">Note</div>${e(inv.notes)}</div>` : ''}
+  ${s.footer ? `<div class="foot">${e(s.footer)}</div>` : ''}
+</div></body></html>`;
+}
+
+function renderInvoices() {
+  const el = $('#invoicesList');
+  if (!el) return;
+  const list = state.invoices || [];
+  if (!list.length) {
+    el.innerHTML = '<div class="empty">No invoices yet. Use "Create invoice" on a client\'s bill under Today, or "Invoice" on their row under Clients.</div>';
+    return;
+  }
+  el.innerHTML = list.map((inv) => {
+    const b = inv.bill_to || {};
+    return `
+    <div class="list-row${inv.voided_at ? ' inv-void' : ''}">
+      <div>
+        <div class="primary">${escapeHtml(inv.number)} · ${escapeHtml(b.business || b.name || clientLabelById(inv.client_id))}</div>
+        <div class="sub"><span class="date">${fmtDate(inv.issue_date)}</span>
+          ${inv.due_date ? `<span>Due ${fmtDate(inv.due_date)}</span>` : ''}
+          ${inv.voided_at ? '<span class="badge danger">Cancelled</span>' : ''}</div>
+      </div>
+      <div class="actions">
+        <div class="amount num">${fmtKES(inv.total)}</div>
+        <button class="btn-sm" onclick="viewInvoice(${inv.id})">Open</button>
+        ${inv.voided_at
+          ? `<button class="btn-sm" onclick="voidInvoice(${inv.id}, true)">Restore</button>`
+          : `<button class="btn-sm danger" onclick="voidInvoice(${inv.id})">Cancel</button>`}
+      </div>
+    </div>`;
+  }).join('');
+}
 
 // ────────── Boot ──────────
 

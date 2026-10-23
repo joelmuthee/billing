@@ -390,6 +390,7 @@ const worker = {
       const scheduled = await env.DB.prepare("SELECT * FROM scheduled_payments ORDER BY due_date ASC").all();
       const prospects = await env.DB.prepare("SELECT * FROM prospects ORDER BY created_at DESC").all();
       const smsInbox = await env.DB.prepare("SELECT * FROM sms_payments WHERE status = 'pending' ORDER BY created_at DESC").all();
+      const invoices = await env.DB.prepare("SELECT * FROM invoices ORDER BY seq DESC LIMIT 1000").all();
       const clients = (clientsRs.results || []).map((c) => ({
         ...c,
         services: parseServices(c.services),
@@ -402,6 +403,7 @@ const worker = {
         scheduled_payments: scheduled.results || [],
         prospects: prospects.results || [],
         sms_inbox: smsInbox.results || [],
+        invoices: (invoices.results || []).map(parseInvoice),
       });
     }
 
@@ -411,7 +413,7 @@ const worker = {
     if (request.method === "GET" && path === "/api/client-summaries") {
       const today = nairobiTodayISO();
       const [cl, pay, sch] = await Promise.all([
-        env.DB.prepare("SELECT id, name, business, plan, amount, status, next_due, ended_date, subaccount_paused, referred_by, catalog_api_base, services FROM clients").all(),
+        env.DB.prepare("SELECT id, name, business, plan, amount, status, next_due, ended_date, subaccount_paused, referred_by, catalog_api_base, services, invoice_type FROM clients").all(),
         env.DB.prepare("SELECT client_id, amount, paid_on FROM payments ORDER BY paid_on DESC, id DESC").all(),
         env.DB.prepare("SELECT client_id, amount, due_date, description, paid_on FROM scheduled_payments WHERE paid_on IS NULL").all(),
       ]);
@@ -459,6 +461,7 @@ const worker = {
           paused: c.subaccount_paused || null, owed, overdue_since: since,
           has_site: !!c.catalog_api_base,   // a shop or gym the client's card can pause
           is_gym: /"gym-manager"/.test(c.services || ""),
+          invoice_type: c.invoice_type || "regular",
           paid_total: paidTotal,
           last_payment: mine[0] ? { paid_on: mine[0].paid_on, amount: mine[0].amount } : null,
           open_lines: open.map((s) => ({ description: s.description, amount: s.amount, due_date: s.due_date })),
@@ -661,6 +664,108 @@ const worker = {
     }
 
     // ─────────── Invoice toggle ───────────
+    // ---- Invoices (regular, non-eTIMS) ----
+    if (path === "/api/invoice-settings") {
+      if (request.method === "GET") return json({ settings: await invoiceSettings(env) });
+      if (request.method === "PUT") {
+        const body = (await readBody(request)) || {};
+        const stmts = [];
+        for (const k of Object.keys(INVOICE_DEFAULTS)) {
+          if (body[k] === undefined) continue;
+          let v = String(body[k] ?? "").trim().slice(0, k === "how_to_pay" || k === "footer" ? 1000 : 200);
+          if (k === "start_number") {
+            const n = Number(v);
+            if (!Number.isInteger(n) || n < 1) return json({ error: "Start number must be a whole number, 1 or more" }, 400);
+            v = String(n);
+          }
+          if (k === "prefix" && !/^[A-Za-z0-9-]{0,12}$/.test(v)) return json({ error: "Prefix can only use letters, numbers and dashes" }, 400);
+          stmts.push(env.DB.prepare("INSERT INTO invoice_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(k, v));
+        }
+        if (stmts.length) await env.DB.batch(stmts);
+        return json({ settings: await invoiceSettings(env) });
+      }
+    }
+
+    if (request.method === "POST" && path === "/api/invoices") {
+      const body = (await readBody(request)) || {};
+      const client = await env.DB.prepare("SELECT * FROM clients WHERE id = ?").bind(Number(body.client_id)).first();
+      if (!client) return json({ error: "Client not found" }, 404);
+      const seller = await invoiceSettings(env);
+      if (!seller.how_to_pay) return json({ error: "Add how clients pay you first, so it prints on the invoice" }, 400);
+      const lines = Array.isArray(body.lines) ? body.lines : [];
+      if (!lines.length || lines.length > 30) return json({ error: "An invoice needs between 1 and 30 lines" }, 400);
+      const clean = [];
+      for (const l of lines) {
+        const description = String((l && l.description) || "").trim().slice(0, 300);
+        const qty = Number(l && l.qty), price = Number(l && l.price);
+        if (!description) return json({ error: "Every line needs a description" }, 400);
+        if (!(qty > 0) || !(price >= 0)) return json({ error: "Quantity must be above 0 and price 0 or more" }, 400);
+        clean.push({ description, qty, price });
+      }
+      const total = Math.round(clean.reduce((a, l) => a + l.qty * l.price, 0));
+      const iso = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || "")) ? String(v) : null);
+      const issue = iso(body.issue_date) || nairobiTodayISO();
+      const due = iso(body.due_date);
+      const b = body.bill_to || {};
+      const billTo = {
+        name: String(b.name ?? client.name ?? "").trim().slice(0, 200),
+        business: String(b.business ?? client.business ?? "").trim().slice(0, 200),
+        phone: String(b.phone ?? client.phone ?? "").trim().slice(0, 60),
+        email: String(b.email ?? client.email ?? "").trim().slice(0, 200),
+        pin: String(b.pin ?? "").trim().slice(0, 30),
+        address: String(b.address ?? "").trim().slice(0, 300),
+      };
+      const forKind = body.for_kind === "recurring" || body.for_kind === "scheduled" ? body.for_kind : null;
+      const forRef = forKind ? String(body.for_ref ?? "") : null;
+      const floor = Math.max(0, Number(seller.start_number || 1) - 1);
+      // One statement picks the next number and writes the row, and seq is UNIQUE, so two
+      // invoices made at the same moment can never share a number. Retry once on that clash.
+      let row = null;
+      for (let attempt = 0; attempt < 2 && !row; attempt++) {
+        try {
+          row = await env.DB.prepare(
+            `INSERT INTO invoices (seq, number, client_id, issue_date, due_date, seller, bill_to, lines, total, notes, for_kind, for_ref)
+             SELECT n, ? || printf('%04d', n), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+             FROM (SELECT MAX(COALESCE((SELECT MAX(seq) FROM invoices), 0), ?) + 1 AS n)
+             RETURNING *`
+          ).bind(seller.prefix || "", client.id, issue, due, JSON.stringify(seller), JSON.stringify(billTo),
+            JSON.stringify(clean), total, String(body.notes || "").trim().slice(0, 1000) || null, forKind, forRef, floor).first();
+        } catch (e) {
+          if (attempt === 1 || !/UNIQUE/i.test(String(e && e.message))) throw e;
+        }
+      }
+      // The bill this invoice is for now counts as invoiced, the same flag "Mark invoiced" sets.
+      if (forKind === "recurring" && forRef && forRef === client.next_due) {
+        await env.DB.prepare("UPDATE clients SET invoice_sent_for_next_due = ?, invoice_sent_date = ? WHERE id = ?")
+          .bind(forRef, issue, client.id).run();
+      } else if (forKind === "scheduled" && Number(forRef) > 0) {
+        await env.DB.prepare("UPDATE scheduled_payments SET invoice_sent_on = ? WHERE id = ? AND client_id = ?")
+          .bind(issue, Number(forRef), client.id).run();
+      }
+      return json({ invoice: parseInvoice(row) });
+    }
+
+    const invoiceVoidMatch = path.match(/^\/api\/invoices\/(\d+)\/void$/);
+    if (invoiceVoidMatch && request.method === "POST") {
+      // Cancelled, never deleted: the number stays used, so the series never has a gap
+      // nobody can explain.
+      const body = (await readBody(request)) || {};
+      const at = body.undo ? null : nairobiTodayISO();
+      const r = await env.DB.prepare("UPDATE invoices SET voided_at = ? WHERE id = ? RETURNING *").bind(at, Number(invoiceVoidMatch[1])).first();
+      if (!r) return json({ error: "not found" }, 404);
+      // The bill it was for goes back to "invoice needed" when cancelled, and back to invoiced
+      // when restored, but only while it is still the bill the client owes next.
+      if (r.for_kind === "recurring" && r.for_ref) {
+        await env.DB.prepare(
+          "UPDATE clients SET invoice_sent_for_next_due = ?, invoice_sent_date = ? WHERE id = ? AND next_due = ?"
+        ).bind(at ? null : r.for_ref, at ? null : r.issue_date, r.client_id, r.for_ref).run();
+      } else if (r.for_kind === "scheduled" && Number(r.for_ref) > 0) {
+        await env.DB.prepare("UPDATE scheduled_payments SET invoice_sent_on = ? WHERE id = ? AND paid_on IS NULL")
+          .bind(at ? null : r.issue_date, Number(r.for_ref)).run();
+      }
+      return json({ invoice: parseInvoice(r) });
+    }
+
     const clientInvoiceMatch = path.match(/^\/api\/clients\/(\d+)\/invoice$/);
     if (clientInvoiceMatch && request.method === "POST") {
       const id = Number(clientInvoiceMatch[1]);
@@ -1077,6 +1182,32 @@ async function runAutopay(env) {
 }
 
 // ─────────── Daily overdue / due-soon digest (self-notification) ───────────
+
+// What prints in the "From" block and the "How to pay" box. Prefilled from your eTIMS invoices;
+// how_to_pay is deliberately empty until you fill it in, and no invoice can be made without it.
+const INVOICE_DEFAULTS = {
+  seller_name: "Joel Muthee Kamwaro",
+  business_name: "Essence Automations",
+  pin: "A004700621G",
+  email: "joel@essenceautomations.com",
+  phone: "+254 720 615606",
+  address: "P.O. Box 570-00208, Ngong, Kenya",
+  how_to_pay: "",
+  footer: "Thank you for your business.",
+  prefix: "EA-",
+  start_number: "1",
+};
+async function invoiceSettings(env) {
+  const rs = await env.DB.prepare("SELECT key, value FROM invoice_settings").all();
+  const out = { ...INVOICE_DEFAULTS };
+  for (const r of rs.results || []) if (r.key in out) out[r.key] = r.value;
+  return out;
+}
+function parseInvoice(r) {
+  if (!r) return r;
+  const parse = (v, d) => { try { return JSON.parse(v); } catch { return d; } };
+  return { ...r, seller: parse(r.seller, {}), bill_to: parse(r.bill_to, {}), lines: parse(r.lines, []) };
+}
 
 function nairobiTodayISO() {
   const nairobi = new Date(Date.now() + 3 * 3600 * 1000);

@@ -123,3 +123,30 @@ CREATE TABLE IF NOT EXISTS prospects (
 );
 CREATE INDEX IF NOT EXISTS idx_prospects_stage ON prospects(stage);
 CREATE INDEX IF NOT EXISTS idx_prospects_followup ON prospects(followup_date);
+
+-- Invoices (migration 017): regular, non-eTIMS invoices with frozen copies of both parties.
+CREATE TABLE IF NOT EXISTS invoices (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  seq INTEGER NOT NULL UNIQUE,
+  number TEXT NOT NULL UNIQUE,
+  client_id INTEGER NOT NULL,
+  issue_date TEXT NOT NULL,
+  due_date TEXT,
+  seller TEXT NOT NULL,        -- JSON snapshot of invoice_settings at issue time
+  bill_to TEXT NOT NULL,       -- JSON snapshot: name, business, phone, email, pin, address
+  lines TEXT NOT NULL,         -- JSON: [{ description, qty, price }]
+  total INTEGER NOT NULL,
+  notes TEXT,
+  for_kind TEXT CHECK (for_kind IN ('recurring', 'scheduled') OR for_kind IS NULL),
+  for_ref TEXT,                -- the next_due it bills, or the scheduled_payments id
+  voided_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (client_id) REFERENCES clients(id)
+);
+CREATE INDEX IF NOT EXISTS idx_invoices_client ON invoices(client_id);
+
+-- Your details as they print on every invoice: name, PIN, contacts, how clients pay you.
+CREATE TABLE IF NOT EXISTS invoice_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
