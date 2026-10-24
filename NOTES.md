@@ -291,7 +291,10 @@ button, and the referrer reads "Purity · Purple Bear" on the row and in the edi
 For clients whose **Invoice type** is **Regular invoice**. eTIMS clients still get theirs from
 the KRA portal and keep "Mark KRA invoiced".
 
-- **Where:** "+ Create invoice" on a regular-invoice bill under Today (and on scheduled lines such
+- **Where:** **"+ New invoice" on Billing > Invoices and on Today** (asks who it is for; eTIMS
+  clients are left out and named underneath). Added 2026-10-24 after Joel asked "where do I go
+  to create an invoice?": the Invoices screen had only listed them, so the obvious place had no
+  button. Also "+ Create invoice" on a regular-invoice bill under Today (and on scheduled lines such
   as a setup or balance), "Invoice" on the client's row under Clients, "Create invoice" on the
   client's card in the CRM. Billing > **Invoices** lists every invoice to reopen, cancel or restore.
 - **Prefilled:** every unpaid bill becomes its own line ("Shop Manager, monthly subscription.
