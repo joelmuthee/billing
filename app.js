@@ -4129,6 +4129,38 @@ window.createInvoice = async function (kind, id) {
   });
 };
 
+// The front door: "+ New invoice" on Invoices and Today asks who it is for, then opens the
+// same form as the buttons on a bill or a client row. eTIMS clients are left out on purpose and
+// named underneath, so none of them seems to have gone missing.
+window.newInvoice = function () {
+  const live = state.clients.filter((c) => c.status !== 'churned');
+  const label = (c) => clientLabelById(c.id);
+  const list = live.filter((c) => (c.invoice_type || 'regular') === 'regular')
+    .sort((a, b) => label(a).localeCompare(label(b)));
+  const kra = live.filter((c) => c.invoice_type === 'kra');
+  openModal(`
+    <h2>New invoice</h2>
+    <p class="muted" style="margin-bottom:14px;">Who is it for? The next screen fills in what they owe.</p>
+    <form id="invPickForm">
+      <label><span>Client</span>
+        <select name="client" required>
+          <option value="">Choose a client</option>
+          ${list.map((c) => `<option value="${c.id}">${escapeHtml(label(c))}</option>`).join('')}
+        </select></label>
+      ${kra.length ? `<p class="muted inv-from">Not in the list because they are on eTIMS (invoiced from the KRA portal): ${kra.map((c) => escapeHtml(c.business || c.name)).join(', ')}. To invoice one here instead, open them under Clients, Edit, and set Invoice type to Regular invoice.</p>` : ''}
+      <p class="muted inv-from">Someone new? Add them under Clients first, then come back here.</p>
+      <div class="modal-actions">
+        <button type="button" class="btn-ghost" onclick="closeModal()">Cancel</button>
+        <button type="submit" class="btn-primary">Next</button>
+      </div>
+    </form>`);
+  $('#invPickForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const id = Number(new FormData(e.target).get('client'));
+    if (id) window.createInvoice('client', id);
+  });
+};
+
 // Your own details, as they print on every invoice. Shown first if how-to-pay is still empty.
 window.editInvoiceSettings = async function (then, firstTime) {
   let s;

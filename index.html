@@ -61,6 +61,7 @@
         <div class="row-between">
           <h2>Today</h2>
           <div class="action-row">
+            <button class="btn-ghost" onclick="newInvoice()">+ New invoice</button>
             <button class="btn-ghost" id="dashRecordPaymentBtn">+ Record payment</button>
             <button class="btn-primary" id="dashAddClientBtn">+ Add client</button>
           </div>
@@ -221,7 +222,10 @@
       <section id="tab-invoices" class="tab-panel">
         <div class="row-between">
           <h2>Invoices</h2>
-          <button class="btn-ghost" onclick="editInvoiceSettings()">Your invoice details</button>
+          <div class="action-row">
+            <button class="btn-ghost" onclick="editInvoiceSettings()">Your invoice details</button>
+            <button class="btn-primary" onclick="newInvoice()">+ New invoice</button>
+          </div>
         </div>
         <p class="muted inv-intro">For clients on a regular invoice. eTIMS invoices still come from the KRA portal.</p>
         <div class="card no-pad" id="invoicesList"></div>
